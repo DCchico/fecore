@@ -1,4 +1,5 @@
 # Tutorial - faasd with multipass
+# DO NOT USE - INVALID
 
 ## Get up and running with your own faasd installation on your Mac
 
@@ -10,7 +11,7 @@ John McCabe has also tested faasd on Windows with multipass, [see his tweet](htt
 
 ## Use-case:
 
-Try out [faasd](https://github.com/openfaas/faasd) in a single command using a cloud-config file to get a VM which has:
+Try out [faasd](https://github.com/faasedge/core) in a single command using a cloud-config file to get a VM which has:
 
 * port 22 for administration and
 * port 8080 for the OpenFaaS REST API.
@@ -139,4 +140,4 @@ You now have a faasd appliance on your Mac. You can also use this cloud-init fil
 * If you want a public IP for your faasd VM, then just head over to [inlets.dev](https://inlets.dev/)
 * Try my more complete walk-through / tutorial with Raspberry Pi, or run the same steps on your multipass VM, including how to develop your own functions and services - https://blog.alexellis.io/faasd-for-lightweight-serverless/
 * You might also like [Building containers without Docker](https://blog.alexellis.io/building-containers-without-docker/)
-* Star/fork [faasd](https://github.com/openfaas/faasd) on GitHub
+* Star/fork [faasd](https://github.com/faasedge/core) on GitHub

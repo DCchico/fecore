@@ -8,7 +8,7 @@ import (
 )
 
 // WelcomeMessage to introduce ofc-bootstrap
-const WelcomeMessage = "Welcome to faasd"
+const WelcomeMessage = "Welcome to FaasEdge-core or (core)"
 
 func init() {
 	rootCommand.AddCommand(versionCmd)
@@ -29,7 +29,7 @@ var (
 	Version string
 )
 
-// Execute faasd
+// Execute core
 func Execute(version, gitCommit string) error {
 
 	// Get Version and GitCommit values from main.go.
@@ -43,12 +43,12 @@ func Execute(version, gitCommit string) error {
 }
 
 var rootCommand = &cobra.Command{
-	Use:   "faasd",
-	Short: "Start faasd",
+	Use:   "core",
+	Short: "Start core",
 	Long: `
-faasd - Serverless For Everyone Else
+faasedge-core - Serverless For Everyone Else
 
-Learn how to build, secure, and monitor functions with faasd with 
+Learn how to build, secure, and monitor functions with core with 
 the eBook:
 
 https://gumroad.com/l/serverless-for-everyone-else
@@ -78,7 +78,7 @@ func parseBaseCommand(_ *cobra.Command, _ []string) {
 }
 
 func printVersion() {
-	fmt.Printf("faasd version: %s\tcommit: %s\n", GetVersion(), GitCommit)
+	fmt.Printf("core version: %s\tcommit: %s\n", GetVersion(), GitCommit)
 }
 
 func printLogo() {
@@ -95,9 +95,11 @@ func GetVersion() string {
 }
 
 // Logo for version and root command
-const Logo = `  __                     _ 
- / _| __ _  __ _ ___  __| |
-| |_ / _` + "`" + ` |/ _` + "`" + ` / __|/ _` + "`" + ` |
-|  _| (_| | (_| \__ \ (_| |
-|_|  \__,_|\__,_|___/\__,_|
+const Logo = `
+ _____                        _                   ____               
+|  ___|_ _  __ _ ___  ___  __| | __ _  ___       / ___|___  _ __ ___ 
+| |_ / _ |/ _  / __|/ _ \/ _ |/ _ |/ _ \__| |   / _ \| '__/ _ \
+|  _| (_| | (_| \__ \  __/ (_| | (_| |  __/_____| |__| (_) | | |  __/
+|_|  \__,_|\__,_|___/\___|\__,_|\__, |\___|      \____\___/|_|  \___|
+                                |___/                                
 `

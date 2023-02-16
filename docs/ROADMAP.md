@@ -1,3 +1,5 @@
+# DO NOT USE - INVALID
+
 # faasd backlog and features
 
 ## Supported operations
@@ -45,7 +47,7 @@ Workaround: Have your client retry HTTP calls, or don't scale to zero.
 
 faasd is operates on a single-node model. If this is an issue for you, but you have resource constraints, you will need to use OpenFaaS on Kubernetes.
 
-There are no plans to add any form of clustering or multi-node support to faasd. See also: [HA / resilience in faasd #225](https://github.com/openfaas/faasd/issues/225)
+There are no plans to add any form of clustering or multi-node support to faasd. See also: [HA / resilience in faasd #225](https://github.com/faasedge/core/issues/225)
 
 What about HA and fault tolerance?
 
@@ -136,7 +138,7 @@ Won't have:
 * [x] Annotation support
 * [x] Hard memory limits for functions
 * [x] Terraform for DigitalOcean
-* [x] [Store and retrieve annotations in function spec](https://github.com/openfaas/faasd/pull/86) - in progress
+* [x] [Store and retrieve annotations in function spec](https://github.com/faasedge/core/pull/86) - in progress
 * [x] An installer for faasd and dependencies - runc, containerd
 * [x] Offer a recommendation or implement a strategy for faasd replication/HA
 

@@ -12,9 +12,9 @@ import (
 
 	"github.com/containerd/containerd"
 	"github.com/containerd/containerd/namespaces"
-	"github.com/openfaas/faasd/pkg"
-	faasd "github.com/openfaas/faasd/pkg"
-	"github.com/openfaas/faasd/pkg/cninetwork"
+	"github.com/faasedge/core/pkg"
+	core "github.com/faasedge/core/pkg"
+	"github.com/faasedge/core/pkg/cninetwork"
 )
 
 type Function struct {
@@ -202,7 +202,7 @@ func ListNamespaces(client *containerd.Client) []string {
 	namespaces, err := store.List(context.Background())
 	if err != nil {
 		log.Printf("Error listing namespaces: %s", err.Error())
-		set = append(set, faasd.DefaultFunctionNamespace)
+		set = append(set, core.DefaultFunctionNamespace)
 		return set
 	}
 
@@ -217,8 +217,8 @@ func ListNamespaces(client *containerd.Client) []string {
 			set = append(set, namespace)
 		}
 
-		if !findNamespace(faasd.DefaultFunctionNamespace, set) {
-			set = append(set, faasd.DefaultFunctionNamespace)
+		if !findNamespace(core.DefaultFunctionNamespace, set) {
+			set = append(set, core.DefaultFunctionNamespace)
 		}
 	}
 

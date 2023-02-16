@@ -2,13 +2,13 @@ package pkg
 
 const (
 	// DefaultFunctionNamespace is the default containerd namespace functions are created
-	DefaultFunctionNamespace = "openfaas-fn"
+	DefaultFunctionNamespace = "faasedge-fn"
 
-	// NamespaceLabel indicates that a namespace is managed by faasd
-	NamespaceLabel = "openfaas"
+	// NamespaceLabel indicates that a namespace is managed by faasedge-core
+	NamespaceLabel = "faasedge"
 
-	// FaasdNamespace is the containerd namespace services are created
-	FaasdNamespace = "openfaas"
+	// FaasEdgeNamespace is the containerd namespace services are created
+	FaasEdgeNamespace = "faasedge"
 
 	faasServicesPullAlways = false
 

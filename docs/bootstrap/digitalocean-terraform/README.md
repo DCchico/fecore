@@ -1,5 +1,7 @@
 # Bootstrap faasd with TLS support on Digitalocean
 
+# DO NOT USE
+
 1) [Sign up to DigitalOcean](https://www.digitalocean.com/?refcode=2962aa9e56a1&utm_campaign=Referral_Invite&utm_medium=Referral_Program&utm_source=CopyPaste)
 2) [Download Terraform](https://www.terraform.io)
 3) Clone this gist using the URL from the address bar

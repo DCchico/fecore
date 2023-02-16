@@ -1,4 +1,5 @@
 #! /bin/bash
+# DO NOT USE
 
 mkdir -p /var/lib/faasd/secrets/
 echo ${gw_password} > /var/lib/faasd/secrets/basic-auth-password

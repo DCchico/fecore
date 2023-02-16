@@ -1,6 +1,8 @@
-## Instructions for building and testing faasd locally
+## Instructions for building and testing core locally
 
-> Note: if you're just wanting to try out faasd, then it's likely that you're on the wrong page. This is a detailed set of instructions for those wanting to contribute or customise faasd. Feel free to go back to the homepage and pick a tutorial instead.
+## HACKY - use core instead of faasd if found
+
+> Note: if you're just wanting to try out core, then it's likely that you're on the wrong page. This is a detailed set of instructions for those wanting to contribute or customise core. Feel free to go back to the homepage and pick a tutorial instead.
 
 Do you want to help the community test a pull request?
 
@@ -8,11 +10,11 @@ See these instructions instead: [Testing patches](/docs/PATCHES.md)
 
 ### Pre-reqs
 
-> It's recommended that you do not install Docker on the same host as faasd, since 1) they may both use different versions of containerd and 2) docker's networking rules can disrupt faasd's networking. When using faasd - make your faasd server a faasd server, and build container image on your laptop or in a CI pipeline.
+> It's recommended that you do not install Docker on the same host as core, since 1) they may both use different versions of containerd and 2) docker's networking rules can disrupt core's networking. When using core - make your core server a core server, and build container image on your laptop or in a CI pipeline.
 
 * Linux
 
-    PC / Cloud - any Linux that containerd works on should be fair game, but faasd is tested with Ubuntu 18.04
+    PC / Cloud - any Linux that containerd works on should be fair game, but core is tested with Ubuntu 18.04
 
     For Raspberry Pi Raspbian Stretch or newer also works fine
 
@@ -24,17 +26,6 @@ See these instructions instead: [Testing patches](/docs/PATCHES.md)
 
     [faas-cli](https://github.com/openfaas/faas-cli) is optional, but recommended.
 
-If you're using multipass, then allocate sufficient resources:
-
-```bash
-multipass launch \
-  --mem 4G \
-  -c 2 \
-  -n faasd
-
-# Then access its shell
-multipass shell faasd
-```
 
 ### Get runc
 
@@ -205,72 +196,54 @@ export PATH=$PATH:/usr/local/go/bin/
 go version
 ```
 
-#### Clone faasd and its systemd unit files
+#### Clone core and its systemd unit files
 
 ```bash
-mkdir -p $GOPATH/src/github.com/openfaas/
-cd $GOPATH/src/github.com/openfaas/
-git clone https://github.com/openfaas/faasd
+mkdir -p $GOPATH/src/github.com/faasedge/
+cd $GOPATH/src/github.com/faasedge/
+git clone https://github.gatech.edu/faasedge/core
 ```
 
-#### Build `faasd` from source (optional)
+#### Build `core` from source (optional)
 
 ```bash
-cd $GOPATH/src/github.com/openfaas/faasd
-cd faasd
+cd $GOPATH/src/github.com/faasedge/core
+cd core
 make local
 
 # Install the binary
-sudo cp bin/faasd /usr/local/bin
+sudo cp bin/core /usr/local/bin
 ```
 
-#### Or, download and run `faasd` (binaries)
+
+#### Install `core`
+
+This step installs core as a systemd unit file, creates files in `/var/lib/core`, and writes out networking configuration for the CNI bridge networking plugin.
 
 ```bash
-# For x86_64
-export SUFFIX=""
+sudo core install
 
-# armhf
-export SUFFIX="-armhf"
-
-# arm64
-export SUFFIX="-arm64"
-
-# Then download
-curl -fSLs "https://github.com/openfaas/faasd/releases/download/0.16.2/faasd$SUFFIX" \
-    -o "/tmp/faasd" \
-    && chmod +x "/tmp/faasd" 
-sudo mv /tmp/faasd /usr/local/bin/
-```
-
-#### Install `faasd`
-
-This step installs faasd as a systemd unit file, creates files in `/var/lib/faasd`, and writes out networking configuration for the CNI bridge networking plugin.
-
-```bash
-sudo faasd install
-
-2020/02/17 17:38:06 Writing to: "/var/lib/faasd/secrets/basic-auth-password"
-2020/02/17 17:38:06 Writing to: "/var/lib/faasd/secrets/basic-auth-user"
+2020/02/17 17:38:06 Writing to: "/var/lib/core/secrets/basic-auth-password"
+2020/02/17 17:38:06 Writing to: "/var/lib/core/secrets/basic-auth-user"
 Login with:
-  sudo cat /var/lib/faasd/secrets/basic-auth-password | faas-cli login -s
+  sudo cat /var/lib/core/secrets/basic-auth-password | faas-cli login -s
 ```
 
 You can now log in either from this machine or a remote machine using the OpenFaaS UI, or CLI.
 
-Check that faasd is ready:
+Check that core is ready:
 
 ```bash
-sudo journalctl -u faasd
+sudo journalctl -u core
 ```
 
 You should see output like:
 
 ```bash
-Feb 17 17:46:35 gold-survive faasd[4140]: 2020/02/17 17:46:35 Starting faasd proxy on 8080
-Feb 17 17:46:35 gold-survive faasd[4140]: Gateway: 10.62.0.5:8080
-Feb 17 17:46:35 gold-survive faasd[4140]: 2020/02/17 17:46:35 [proxy] Wait for done
-Feb 17 17:46:35 gold-survive faasd[4140]: 2020/02/17 17:46:35 [proxy] Begin listen on 8080
+Feb 17 17:46:35 gold-survive core[4140]: 2020/02/17 17:46:35 Starting core proxy on 8080
+Feb 17 17:46:35 gold-survive core[4140]: Gateway: 10.62.0.5:8080
+Feb 17 17:46:35 gold-survive core[4140]: 2020/02/17 17:46:35 [proxy] Wait for done
+Feb 17 17:46:35 gold-survive core[4140]: 2020/02/17 17:46:35 [proxy] Begin listen on 8080
 ```
 
 To get the CLI for the command above run:
@@ -279,19 +252,19 @@ To get the CLI for the command above run:
 curl -sSLf https://cli.openfaas.com | sudo sh
 ```
 
-#### Make a change to `faasd`
+#### Make a change to `core`
 
 There are two components you can hack on:
 
-For function CRUD you will work on `faasd provider` which is started from `cmd/provider.go`
+For function CRUD you will work on `core provider` which is started from `cmd/provider.go`
 
-For faasd itself, you will work on the code from `faasd up`, which is started from `cmd/up.go`
+For core itself, you will work on the code from `core up`, which is started from `cmd/up.go`
 
 Before working on either, stop the systemd services:
 
 ```
-sudo systemctl stop faasd &    # up command
-sudo systemctl stop faasd-provider   # provider command
+sudo systemctl stop core &    # up command
+sudo systemctl stop core-provider   # provider command
 ```
 
 Here is a workflow you can use for each code change:
@@ -299,41 +272,41 @@ Here is a workflow you can use for each code change:
 Enter the directory of the source code, and build a new binary:
 
 ```bash
-cd $GOPATH/src/github.com/openfaas/faasd
+cd $GOPATH/src/github.com/faasedge/core
 go build
 ```
 
 Copy that binary to `/usr/local/bin/`
 
 ```bash
-cp faasd /usr/local/bin/
+cp core /usr/local/bin/
 ```
 
-To run `faasd up`, run it from its working directory as root
+To run `core up`, run it from its working directory as root
 
 ```bash
 sudo -i
-cd /var/lib/faasd
+cd /var/lib/core
 
-faasd up
+core up
 ```
 
-Now to run `faasd provider`, run it from its working directory:
+Now to run `core provider`, run it from its working directory:
 
 ```bash
 sudo -i
-cd /var/lib/faasd-provider
+cd /var/lib/core-provider
 
-faasd provider
+core provider
 ```
 
 #### At run-time
 
-Look in `hosts` in the current working folder or in `/var/lib/faasd/` to get the IP for the gateway or Prometheus
+Look in `hosts` in the current working folder or in `/var/lib/core/` to get the IP for the gateway or Prometheus
 
 ```bash
 127.0.0.1      localhost
-10.62.0.1      faasd-provider
+10.62.0.1      core-provider
 
 10.62.0.2      prometheus
 10.62.0.3      gateway
@@ -343,43 +316,43 @@ Look in `hosts` in the current working folder or in `/var/lib/faasd/` to get the
 
 The IP addresses are dynamic and may change on every launch.
 
-Since faasd-provider uses containerd heavily it is not running as a container, but as a stand-alone process. Its port is available via the bridge interface, i.e. `openfaas0`
+Since core-provider uses containerd heavily it is not running as a container, but as a stand-alone process. Its port is available via the bridge interface, i.e. `openfaas0`
 
 * Prometheus will run on the Prometheus IP plus port 8080 i.e. http://[prometheus_ip]:9090/targets
 
-* faasd-provider runs on 10.62.0.1:8081, i.e. directly on the host, and accessible via the bridge interface from CNI.
+* core-provider runs on 10.62.0.1:8081, i.e. directly on the host, and accessible via the bridge interface from CNI.
 
 * Now go to the gateway's IP address as shown above on port 8080, i.e. http://[gateway_ip]:8080 - you can also use this address to deploy OpenFaaS Functions via the `faas-cli`. 
 
 * basic-auth
 
-    You will then need to get the basic-auth password, it is written to `/var/lib/faasd/secrets/basic-auth-password` if you followed the above instructions.
-The default Basic Auth username is `admin`, which is written to `/var/lib/faasd/secrets/basic-auth-user`, if you wish to use a non-standard user then create this file and add your username (no newlines or other characters) 
+    You will then need to get the basic-auth password, it is written to `/var/lib/core/secrets/basic-auth-password` if you followed the above instructions.
+The default Basic Auth username is `admin`, which is written to `/var/lib/core/secrets/basic-auth-user`, if you wish to use a non-standard user then create this file and add your username (no newlines or other characters) 
 
 #### Installation with systemd
 
-* `faasd install` - install faasd and containerd with systemd, this must be run from `$GOPATH/src/github.com/openfaas/faasd`
-* `journalctl -u faasd -f` - faasd service logs
-* `journalctl -u faasd-provider -f` - faasd-provider service logs
+* `core install` - install core and containerd with systemd, this must be run from `$GOPATH/src/github.com/faasedge/core`
+* `journalctl -u core -f` - core service logs
+* `journalctl -u core-provider -f` - core-provider service logs
 
 #### Uninstall
 
-* Stop faasd and faasd-provider
+* Stop core and core-provider
 ```
-sudo systemctl stop faasd
-sudo systemctl stop faasd-provider
+sudo systemctl stop core
+sudo systemctl stop core-provider
 sudo systemctl stop containerd
 ```
 
-* Remove faasd from machine
+* Remove core from machine
 ```
-sudo systemctl disable faasd
-sudo systemctl disable faasd-provider
+sudo systemctl disable core
+sudo systemctl disable core-provider
 sudo systemctl disable containerd
-sudo rm -rf /usr/local/bin/faasd
-sudo rm -rf /var/lib/faasd
-sudo rm -rf /usr/lib/systemd/system/faasd-provider.service
-sudo rm -rf /usr/lib/systemd/system/faasd.service
+sudo rm -rf /usr/local/bin/core
+sudo rm -rf /var/lib/core
+sudo rm -rf /usr/lib/systemd/system/core-provider.service
+sudo rm -rf /usr/lib/systemd/system/core.service
 sudo rm -rf /usr/lib/systemd/system/containerd
 sudo systemctl daemon-reload
 ```

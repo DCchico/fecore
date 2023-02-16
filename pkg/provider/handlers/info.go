@@ -12,7 +12,7 @@ const (
 	OrchestrationIdentifier = "containerd"
 
 	// ProviderName name of the provider
-	ProviderName = "faasd"
+	ProviderName = "core"
 )
 
 //MakeInfoHandler creates handler for /system/info endpoint

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/openfaas/faasd/cmd"
+	"github.com/faasedge/core/cmd"
 )
 
 // These values will be injected into these variables at the build time.

@@ -3,7 +3,7 @@ package pkg
 import (
 	"log"
 
-	"github.com/openfaas/faasd/pkg/depgraph"
+	"github.com/faasedge/core/pkg/depgraph"
 )
 
 func buildDeploymentOrder(svcs []Service) []string {

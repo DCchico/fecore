@@ -1,10 +1,10 @@
 [Unit]
-Description=faasd
-After=faasd-provider.service
+Description=core
+After=core-provider.service
 
 [Service]
 MemoryLimit=500M
-ExecStart=/usr/local/bin/faasd up
+ExecStart=/usr/local/bin/core up
 Restart=on-failure
 RestartSec=10s
 WorkingDirectory={{.Cwd}}

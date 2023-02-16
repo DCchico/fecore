@@ -1,12 +1,12 @@
 [Unit]
-Description=faasd-provider
+Description=core-provider
 
 [Service]
 MemoryLimit=500M
 Environment="secret_mount_path={{.SecretMountPath}}"
 Environment="basic_auth=true"
-Environment="hosts_dir=/var/lib/faasd"
-ExecStart=/usr/local/bin/faasd provider
+Environment="hosts_dir=/var/lib/core"
+ExecStart=/usr/local/bin/core provider
 Restart=on-failure
 RestartSec=10s
 WorkingDirectory={{.Cwd}}

@@ -1,4 +1,5 @@
 ## Instructions for testing a patch for faasd
+# DO NOT USE - INVALID
 
 ### Launch a virtual machine
 
@@ -30,7 +31,7 @@ You start off with the upstream version of faasd on the host, then add the new v
 
 ```bash
 cd /tmp/
-git clone https://github.com/openfaas/faasd --depth=1
+git clone https://github.com/faasedge/core --depth=1
 cd faasd/hack
 ./install.sh
 
@@ -48,7 +49,7 @@ export IP=$(multipass info faasd --format json| jq -r '.info.faasd.ipv4[0]')
 Check out faasd on your local computer
 
 ```bash
-git clone https://github.com/openfaas/faasd
+git clone https://github.com/faasedge/core
 cd faasd
 
 gh pr checkout #PR_NUMBER_HERE

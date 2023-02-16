@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/containerd/containerd"
-	faasd "github.com/openfaas/faasd/pkg"
+	core "github.com/faasedge/core/pkg"
 )
 
 const watchdogPort = 8080
@@ -24,7 +24,7 @@ func (i *InvokeResolver) Resolve(functionName string) (url.URL, error) {
 	actualFunctionName := functionName
 	log.Printf("Resolve: %q\n", actualFunctionName)
 
-	namespace := getNamespace(functionName, faasd.DefaultFunctionNamespace)
+	namespace := getNamespace(functionName, core.DefaultFunctionNamespace)
 
 	if strings.Contains(functionName, ".") {
 		actualFunctionName = strings.TrimSuffix(functionName, "."+namespace)

@@ -1,4 +1,4 @@
-module github.com/openfaas/faasd
+module github.com/faasedge/core
 
 go 1.18
 

@@ -1,8 +1,9 @@
 # Terraform Modules for faasd
+# DO NOT USE
 
 | Terraform Module | Author | Origin | Status |
 |-----------|--------|--------|--------|
-| [faasd on DigitalOcean](https://github.com/openfaas/faasd/tree/master/docs/bootstrap/digitalocean-terraform) | OpenFaaS | Official | Active |
+| [faasd on DigitalOcean](https://github.com/faasedge/core/tree/master/docs/bootstrap/digitalocean-terraform) | OpenFaaS | Official | Active |
 | [faasd on DigitalOcean](https://github.com/jsiebens/terraform-digitalocean-faasd) | Johan Siebens | Community | Active |
 | [faasd on Google Cloud Platform](https://github.com/jsiebens/terraform-google-faasd) | Johan Siebens | Community | Active |
 | [faasd on Microsoft Azure ](https://github.com/jsiebens/terraform-azurerm-faasd) | Johan Siebens | Community | Active |

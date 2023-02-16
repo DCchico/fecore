@@ -6,7 +6,7 @@ import (
 	"os"
 	"path"
 
-	systemd "github.com/openfaas/faasd/pkg/systemd"
+	systemd "github.com/faasedge/core/pkg/systemd"
 	"github.com/pkg/errors"
 
 	"github.com/spf13/cobra"
@@ -14,56 +14,56 @@ import (
 
 var installCmd = &cobra.Command{
 	Use:   "install",
-	Short: "Install faasd",
+	Short: "Install core",
 	RunE:  runInstall,
 }
 
 const workingDirectoryPermission = 0644
 
-const faasdwd = "/var/lib/faasd"
+const corewd = "/var/lib/core"
 
-const faasdProviderWd = "/var/lib/faasd-provider"
+const coreProviderWd = "/var/lib/core-provider"
 
 func runInstall(_ *cobra.Command, _ []string) error {
 
-	if err := ensureWorkingDir(path.Join(faasdwd, "secrets")); err != nil {
+	if err := ensureWorkingDir(path.Join(corewd, "secrets")); err != nil {
 		return err
 	}
 
-	if err := ensureWorkingDir(faasdProviderWd); err != nil {
+	if err := ensureWorkingDir(coreProviderWd); err != nil {
 		return err
 	}
 
-	if basicAuthErr := makeBasicAuthFiles(path.Join(faasdwd, "secrets")); basicAuthErr != nil {
+	if basicAuthErr := makeBasicAuthFiles(path.Join(corewd, "secrets")); basicAuthErr != nil {
 		return errors.Wrap(basicAuthErr, "cannot create basic-auth-* files")
 	}
 
-	if err := cp("docker-compose.yaml", faasdwd); err != nil {
+	if err := cp("docker-compose.yaml", corewd); err != nil {
 		return err
 	}
 
-	if err := cp("prometheus.yml", faasdwd); err != nil {
+	if err := cp("prometheus.yml", corewd); err != nil {
 		return err
 	}
 
-	if err := cp("resolv.conf", faasdwd); err != nil {
+	if err := cp("resolv.conf", corewd); err != nil {
 		return err
 	}
 
-	err := binExists("/usr/local/bin/", "faasd")
+	err := binExists("/usr/local/bin/", "core")
 	if err != nil {
 		return err
 	}
 
-	err = systemd.InstallUnit("faasd-provider", map[string]string{
-		"Cwd":             faasdProviderWd,
-		"SecretMountPath": path.Join(faasdwd, "secrets")})
+	err = systemd.InstallUnit("core-provider", map[string]string{
+		"Cwd":             coreProviderWd,
+		"SecretMountPath": path.Join(corewd, "secrets")})
 
 	if err != nil {
 		return err
 	}
 
-	err = systemd.InstallUnit("faasd", map[string]string{"Cwd": faasdwd})
+	err = systemd.InstallUnit("core", map[string]string{"Cwd": corewd})
 	if err != nil {
 		return err
 	}
@@ -73,31 +73,31 @@ func runInstall(_ *cobra.Command, _ []string) error {
 		return err
 	}
 
-	err = systemd.Enable("faasd-provider")
+	err = systemd.Enable("core-provider")
 	if err != nil {
 		return err
 	}
 
-	err = systemd.Enable("faasd")
+	err = systemd.Enable("core")
 	if err != nil {
 		return err
 	}
 
-	err = systemd.Start("faasd-provider")
+	err = systemd.Start("core-provider")
 	if err != nil {
 		return err
 	}
 
-	err = systemd.Start("faasd")
+	err = systemd.Start("core")
 	if err != nil {
 		return err
 	}
 
 	fmt.Println(`Check status with:
-  sudo journalctl -u faasd --lines 100 -f
+  sudo journalctl -u core --lines 100 -f
 
 Login with:
-  sudo cat /var/lib/faasd/secrets/basic-auth-password | faas-cli login -s`)
+  sudo cat /var/lib/core/secrets/basic-auth-password | faas-cli login -s`)
 
 	return nil
 }
