@@ -1,14 +1,15 @@
 #!/bin/bash
+# run with sudo
 
 set -e
 
-sudo systemctl stop core
-sudo systemctl stop core-provider
+systemctl stop core
+systemctl stop core-provider
 
 GO=/usr/local/go/bin/go
 $GO build
 
 cp core /usr/local/bin/ -f
 
-sudo systemctl start core
-sudo systemctl start core-provider
+systemctl start core
+systemctl start core-provider
