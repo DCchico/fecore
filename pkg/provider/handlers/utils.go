@@ -5,9 +5,9 @@ import (
 	"net/http"
 	"path"
 
-	"github.com/faasedge/core/pkg"
-	core "github.com/faasedge/core/pkg"
-	provider "github.com/faasedge/core/pkg/provider"
+	"github.gatech.edu/faasedge/fecore/pkg"
+	fecore "github.gatech.edu/faasedge/fecore/pkg"
+	provider "github.gatech.edu/faasedge/fecore/pkg/provider"
 )
 
 func getRequestNamespace(namespace string) string {
@@ -15,7 +15,7 @@ func getRequestNamespace(namespace string) string {
 	if len(namespace) > 0 {
 		return namespace
 	}
-	return core.DefaultFunctionNamespace
+	return fecore.DefaultFunctionNamespace
 }
 
 func readNamespaceFromQuery(r *http.Request) string {
@@ -30,7 +30,7 @@ func getNamespaceSecretMountPath(userSecretPath string, namespace string) string
 // validNamespace indicates whether the namespace is eligable to be
 // used for OpenFaaS functions.
 func validNamespace(store provider.Labeller, namespace string) (bool, error) {
-	if namespace == core.DefaultFunctionNamespace {
+	if namespace == fecore.DefaultFunctionNamespace {
 		return true, nil
 	}
 

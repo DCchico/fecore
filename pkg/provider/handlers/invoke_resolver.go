@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/containerd/containerd"
-	core "github.com/faasedge/core/pkg"
+	fecore "github.gatech.edu/faasedge/fecore/pkg"
 )
 
 const watchdogPort = 8080
@@ -24,7 +24,7 @@ func (i *InvokeResolver) Resolve(functionName string) (url.URL, error) {
 	actualFunctionName := functionName
 	log.Printf("Resolve: %q\n", actualFunctionName)
 
-	namespace := getNamespace(functionName, core.DefaultFunctionNamespace)
+	namespace := getNamespace(functionName, fecore.DefaultFunctionNamespace)
 
 	if strings.Contains(functionName, ".") {
 		actualFunctionName = strings.TrimSuffix(functionName, "."+namespace)

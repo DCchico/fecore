@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	core "github.com/faasedge/core/pkg"
+	fecore "github.gatech.edu/faasedge/fecore/pkg"
 )
 
 func Test_getRequestNamespace(t *testing.T) {
@@ -15,7 +15,7 @@ func Test_getRequestNamespace(t *testing.T) {
 		requestNamespace  string
 		expectedNamespace string
 	}{
-		{name: "RequestNamespace is not provided", requestNamespace: "", expectedNamespace: core.DefaultFunctionNamespace},
+		{name: "RequestNamespace is not provided", requestNamespace: "", expectedNamespace: fecore.DefaultFunctionNamespace},
 		{name: "RequestNamespace is provided", requestNamespace: "user-namespace", expectedNamespace: "user-namespace"},
 	}
 
@@ -36,7 +36,7 @@ func Test_getNamespaceSecretMountPath(t *testing.T) {
 		requestNamespace   string
 		expectedSecretPath string
 	}{
-		{name: "Default Namespace is provided", requestNamespace: core.DefaultFunctionNamespace, expectedSecretPath: "/var/openfaas/secrets/" + core.DefaultFunctionNamespace},
+		{name: "Default Namespace is provided", requestNamespace: fecore.DefaultFunctionNamespace, expectedSecretPath: "/var/openfaas/secrets/" + fecore.DefaultFunctionNamespace},
 		{name: "User Namespace is provided", requestNamespace: "user-namespace", expectedSecretPath: "/var/openfaas/secrets/user-namespace"},
 	}
 

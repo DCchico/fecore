@@ -14,7 +14,7 @@ all: test dist hashgen
 publish: dist hashgen
 
 local:
-	CGO_ENABLED=0 GOOS=linux go build -mod=vendor -o bin/core
+	CGO_ENABLED=0 GOOS=linux go build -mod=vendor -o bin/fecore
 
 .PHONY: test
 test:
@@ -22,13 +22,13 @@ test:
 
 .PHONY: dist
 dist:
-	CGO_ENABLED=0 GOOS=linux go build -mod=vendor -ldflags $(LDFLAGS) -a -installsuffix cgo -o bin/core
-	CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 go build -mod=vendor -ldflags $(LDFLAGS) -a -installsuffix cgo -o bin/core-armhf
-	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -mod=vendor -ldflags $(LDFLAGS) -a -installsuffix cgo -o bin/core-arm64
+	CGO_ENABLED=0 GOOS=linux go build -mod=vendor -ldflags $(LDFLAGS) -a -installsuffix cgo -o bin/fecore
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 go build -mod=vendor -ldflags $(LDFLAGS) -a -installsuffix cgo -o bin/fecore-armhf
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -mod=vendor -ldflags $(LDFLAGS) -a -installsuffix cgo -o bin/fecore-arm64
 
 .PHONY: hashgen
 hashgen:
-	for f in bin/core*; do shasum -a 256 $$f > $$f.sha256; done
+	for f in bin/fecore*; do shasum -a 256 $$f > $$f.sha256; done
 
 .PHONY: prepare-test
 prepare-test:
@@ -38,18 +38,18 @@ prepare-test:
 	sudo /sbin/sysctl -w net.ipv4.conf.all.forwarding=1
 	sudo mkdir -p /opt/cni/bin
 	curl -sSL https://github.com/containernetworking/plugins/releases/download/$(CNI_VERSION)/cni-plugins-linux-$(ARCH)-$(CNI_VERSION).tgz | sudo tar -xz -C /opt/cni/bin
-	sudo cp bin/core /usr/local/bin/
-	sudo /usr/local/bin/core install
+	sudo cp bin/fecore /usr/local/bin/
+	sudo /usr/local/bin/fecore install
 	sudo systemctl status -l containerd --no-pager
-	sudo journalctl -u core-provider --no-pager
-	sudo systemctl status -l core-provider --no-pager
-	sudo systemctl status -l core --no-pager
+	sudo journalctl -u fecore-provider --no-pager
+	sudo systemctl status -l fecore-provider --no-pager
+	sudo systemctl status -l fecore --no-pager
 	curl -sSLf https://cli.openfaas.com | sudo sh
-	echo "Sleeping for 2m" && sleep 120 && sudo journalctl -u core --no-pager
+	echo "Sleeping for 2m" && sleep 120 && sudo journalctl -u fecore --no-pager
 
 .PHONY: test-e2e
 test-e2e:
-	sudo cat /var/lib/core/secrets/basic-auth-password | /usr/local/bin/faas-cli login --password-stdin
+	sudo cat /var/lib/fecore/secrets/basic-auth-password | /usr/local/bin/faas-cli login --password-stdin
 	/usr/local/bin/faas-cli store deploy figlet --env write_timeout=1s --env read_timeout=1s --label testing=true
 	sleep 5
 	/usr/local/bin/faas-cli list -v

@@ -1,4 +1,4 @@
-module github.com/faasedge/core
+module github.gatech.edu/faasedge/fecore
 
 go 1.18
 

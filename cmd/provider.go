@@ -10,11 +10,11 @@ import (
 	"path"
 
 	"github.com/containerd/containerd"
-	core "github.com/faasedge/core/pkg"
-	"github.com/faasedge/core/pkg/cninetwork"
-	corelogs "github.com/faasedge/core/pkg/logs"
-	"github.com/faasedge/core/pkg/provider/config"
-	"github.com/faasedge/core/pkg/provider/handlers"
+	fecore "github.gatech.edu/faasedge/fecore/pkg"
+	"github.gatech.edu/faasedge/fecore/pkg/cninetwork"
+	fecorelogs "github.gatech.edu/faasedge/fecore/pkg/logs"
+	"github.gatech.edu/faasedge/fecore/pkg/provider/config"
+	"github.gatech.edu/faasedge/fecore/pkg/provider/handlers"
 	bootstrap "github.com/openfaas/faas-provider"
 	"github.com/openfaas/faas-provider/logs"
 	"github.com/openfaas/faas-provider/proxy"
@@ -27,7 +27,7 @@ const secretDirPermission = 0755
 func makeProviderCmd() *cobra.Command {
 	var command = &cobra.Command{
 		Use:   "provider",
-		Short: "Run the core-provider",
+		Short: "Run the fecore-provider",
 	}
 
 	command.Flags().String("pull-policy", "Always", `Set to "Always" to force a pull of images upon deployment, or "IfNotPresent" to try to use a cached image.`)
@@ -49,7 +49,7 @@ func makeProviderCmd() *cobra.Command {
 			return err
 		}
 
-		log.Printf("core-provider starting..\tService Timeout: %s\n", config.WriteTimeout.String())
+		log.Printf("fecore-provider starting...\tService Timeout: %s\n", config.WriteTimeout.String())
 		printVersion()
 
 		wd, err := os.Getwd()
@@ -88,7 +88,7 @@ func makeProviderCmd() *cobra.Command {
 		baseUserSecretsPath := path.Join(wd, "secrets")
 		if err := moveSecretsToDefaultNamespaceSecrets(
 			baseUserSecretsPath,
-			core.DefaultFunctionNamespace); err != nil {
+			fecore.DefaultFunctionNamespace); err != nil {
 			return err
 		}
 
@@ -104,7 +104,7 @@ func makeProviderCmd() *cobra.Command {
 			InfoHandler:          handlers.MakeInfoHandler(Version, GitCommit),
 			ListNamespaceHandler: handlers.MakeNamespacesLister(client),
 			SecretHandler:        handlers.MakeSecretHandler(client.NamespaceService(), baseUserSecretsPath),
-			LogHandler:           logs.NewLogHandlerFunc(corelogs.New(), config.ReadTimeout),
+			LogHandler:           logs.NewLogHandlerFunc(fecorelogs.New(), config.ReadTimeout),
 		}
 
 		log.Printf("Listening on TCP port: %d\n", *config.TCPPort)
@@ -117,7 +117,7 @@ func makeProviderCmd() *cobra.Command {
 
 /*
 * Mutiple namespace support was added after release 0.13.0
-* Function will help users to migrate on multiple namespace support of core
+* Function will help users to migrate on multiple namespace support of fecore
  */
 func moveSecretsToDefaultNamespaceSecrets(baseSecretPath string, defaultNamespace string) error {
 	newSecretPath := path.Join(baseSecretPath, defaultNamespace)

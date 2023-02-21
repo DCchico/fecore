@@ -20,8 +20,8 @@ import (
 	"github.com/containerd/containerd/oci"
 	gocni "github.com/containerd/go-cni"
 	"github.com/docker/distribution/reference"
-	"github.com/faasedge/core/pkg/cninetwork"
-	"github.com/faasedge/core/pkg/service"
+	"github.gatech.edu/faasedge/fecore/pkg/cninetwork"
+	"github.gatech.edu/faasedge/fecore/pkg/service"
 	"github.com/pkg/errors"
 
 	"github.com/containerd/containerd/namespaces"
@@ -94,7 +94,7 @@ func (s *Supervisor) Start(svcs []Service) error {
 	}
 	hosts := fmt.Sprintf(`
 127.0.0.1	localhost
-%s	core-provider`, gw)
+%s	fecore-provider`, gw)
 
 	writeHostsErr := ioutil.WriteFile(path.Join(wd, "hosts"),
 		[]byte(hosts), workingDirectoryPermission)
@@ -161,7 +161,7 @@ func (s *Supervisor) Start(svcs []Service) error {
 				// Only create directories, not files.
 				// Some files don't have a suffix, such as secrets.
 				if len(path.Ext(mnt.Src)) == 0 &&
-					!strings.HasPrefix(mnt.Src, "/var/lib/core/secrets/") {
+					!strings.HasPrefix(mnt.Src, "/var/lib/fecore/secrets/") {
 					// src is already prefixed with wd from an earlier step
 					src := mnt.Src
 					fmt.Printf("Creating local directory: %s\n", src)
@@ -221,7 +221,7 @@ func (s *Supervisor) Start(svcs []Service) error {
 
 		log.Printf("Created container: %s\n", newContainer.ID())
 
-		task, err := newContainer.NewTask(ctx, cio.BinaryIO("/usr/local/bin/core", nil))
+		task, err := newContainer.NewTask(ctx, cio.BinaryIO("/usr/local/bin/fecore", nil))
 		if err != nil {
 			log.Printf("Error creating task: %s\n", err)
 			return err
@@ -431,7 +431,7 @@ func GetArchSuffix(getClientArch ArchGetter) (suffix string, err error) {
 	clientArch, clientOS := getClientArch()
 
 	if clientOS != "Linux" {
-		return "", fmt.Errorf("you can only use core with Linux")
+		return "", fmt.Errorf("You can only use fecore with Linux")
 	}
 
 	switch clientArch {

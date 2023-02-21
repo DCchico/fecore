@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/faasedge/core/cmd"
+	"github.gatech.edu/faasedge/fecore/cmd"
 )
 
 // These values will be injected into these variables at the build time.

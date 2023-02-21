@@ -3,7 +3,7 @@ package pkg
 import (
 	"log"
 
-	"github.com/faasedge/core/pkg/depgraph"
+	"github.gatech.edu/faasedge/fecore/pkg/depgraph"
 )
 
 func buildDeploymentOrder(svcs []Service) []string {

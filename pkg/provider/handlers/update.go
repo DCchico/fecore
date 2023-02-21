@@ -13,8 +13,8 @@ import (
 	gocni "github.com/containerd/go-cni"
 	"github.com/openfaas/faas-provider/types"
 
-	"github.com/faasedge/core/pkg/cninetwork"
-	"github.com/faasedge/core/pkg/service"
+	"github.gatech.edu/faasedge/fecore/pkg/cninetwork"
+	"github.gatech.edu/faasedge/fecore/pkg/service"
 )
 
 func MakeUpdateHandler(client *containerd.Client, cni gocni.CNI, secretMountPath string, alwaysPull bool) func(w http.ResponseWriter, r *http.Request) {

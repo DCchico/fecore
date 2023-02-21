@@ -12,8 +12,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/faasedge/core/pkg"
-	provider "github.com/faasedge/core/pkg/provider"
+	"github.gatech.edu/faasedge/fecore/pkg"
+	provider "github.gatech.edu/faasedge/fecore/pkg/provider"
 	"github.com/openfaas/faas-provider/types"
 )
 

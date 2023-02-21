@@ -12,9 +12,9 @@ import (
 
 	"github.com/containerd/containerd"
 	"github.com/containerd/containerd/namespaces"
-	"github.com/faasedge/core/pkg"
-	core "github.com/faasedge/core/pkg"
-	"github.com/faasedge/core/pkg/cninetwork"
+	"github.gatech.edu/faasedge/fecore/pkg"
+	fecore "github.gatech.edu/faasedge/fecore/pkg"
+	"github.gatech.edu/faasedge/fecore/pkg/cninetwork"
 )
 
 type Function struct {
@@ -202,7 +202,7 @@ func ListNamespaces(client *containerd.Client) []string {
 	namespaces, err := store.List(context.Background())
 	if err != nil {
 		log.Printf("Error listing namespaces: %s", err.Error())
-		set = append(set, core.DefaultFunctionNamespace)
+		set = append(set, fecore.DefaultFunctionNamespace)
 		return set
 	}
 
@@ -217,8 +217,8 @@ func ListNamespaces(client *containerd.Client) []string {
 			set = append(set, namespace)
 		}
 
-		if !findNamespace(core.DefaultFunctionNamespace, set) {
-			set = append(set, core.DefaultFunctionNamespace)
+		if !findNamespace(fecore.DefaultFunctionNamespace, set) {
+			set = append(set, fecore.DefaultFunctionNamespace)
 		}
 	}
 

@@ -57,7 +57,7 @@ func Test_ParseCompose(t *testing.T) {
 				"direct_functions=false",
 				"faas_nats_address=nats",
 				"faas_nats_port=4222",
-				"functions_provider_url=http://core-provider:8081/",
+				"functions_provider_url=http://fecore-provider:8081/",
 				"read_timeout=60s",
 				"scale_from_zero=true",
 				"secret_mount_path=/run/secrets",
@@ -196,7 +196,7 @@ func Test_GetArchSuffix(t *testing.T) {
 		{
 			name:    "error if os is not linux",
 			foundOS: "mac",
-			err:     "you can only use core with Linux",
+			err:     "You can only use fecore with Linux",
 		},
 		{
 			name:      "x86 has no suffix",

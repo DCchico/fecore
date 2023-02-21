@@ -29,4 +29,4 @@ scrape_configs:
 
   - job_name: 'provider'
     static_configs:
-    - targets: ['core-provider:8081']
+    - targets: ['fecore-provider:8081']

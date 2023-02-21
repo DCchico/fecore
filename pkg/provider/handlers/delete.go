@@ -13,8 +13,8 @@ import (
 	gocni "github.com/containerd/go-cni"
 	"github.com/openfaas/faas/gateway/requests"
 
-	cninetwork "github.com/faasedge/core/pkg/cninetwork"
-	"github.com/faasedge/core/pkg/service"
+	cninetwork "github.gatech.edu/faasedge/fecore/pkg/cninetwork"
+	"github.gatech.edu/faasedge/fecore/pkg/service"
 )
 
 func MakeDeleteHandler(client *containerd.Client, cni gocni.CNI) func(w http.ResponseWriter, r *http.Request) {

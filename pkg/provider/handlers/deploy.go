@@ -18,8 +18,8 @@ import (
 	"github.com/containerd/containerd/oci"
 	gocni "github.com/containerd/go-cni"
 	"github.com/docker/distribution/reference"
-	cninetwork "github.com/faasedge/core/pkg/cninetwork"
-	"github.com/faasedge/core/pkg/service"
+	cninetwork "github.gatech.edu/faasedge/fecore/pkg/cninetwork"
+	"github.gatech.edu/faasedge/fecore/pkg/service"
 	"github.com/opencontainers/runtime-spec/specs-go"
 	"github.com/openfaas/faas-provider/types"
 	"github.com/pkg/errors"
@@ -207,7 +207,7 @@ func createTask(ctx context.Context, container containerd.Container, cni gocni.C
 
 	name := container.ID()
 
-	task, taskErr := container.NewTask(ctx, cio.BinaryIO("/usr/local/bin/core", nil))
+	task, taskErr := container.NewTask(ctx, cio.BinaryIO("/usr/local/bin/fecore", nil))
 
 	if taskErr != nil {
 		return fmt.Errorf("unable to start task: %s, error: %w", name, taskErr)
@@ -267,7 +267,7 @@ func prepareEnv(envProcess string, reqEnvVars map[string]string) []string {
 func getOSMounts() []specs.Mount {
 	// Prior to hosts_dir env-var, this value was set to
 	// os.Getwd()
-	hostsDir := "/var/lib/core"
+	hostsDir := "/var/lib/fecore"
 	if v, ok := os.LookupEnv("hosts_dir"); ok && len(v) > 0 {
 		hostsDir = v
 	}

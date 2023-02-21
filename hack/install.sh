@@ -5,8 +5,8 @@
 
 set -e -x -o pipefail
 
-export OWNER="openfaas"
-export REPO="faasd"
+export OWNER="faasedge"
+export REPO="fecore"
 
 # On CentOS /usr/local/bin is not included in the PATH when using sudo. 
 # Running arkade with sudo on CentOS requires the full path
@@ -23,7 +23,7 @@ fi
 version=""
 
 echo "Finding latest version from GitHub"
-version=$(curl -sI https://github.com/$OWNER/$REPO/releases/latest | grep -i "location:" | awk -F"/" '{ printf "%s", $NF }' | tr -d '\r')
+version=$(curl -sI https://github.gatech.edu/$OWNER/$REPO/releases/latest | grep -i "location:" | awk -F"/" '{ printf "%s", $NF }' | tr -d '\r')
 echo "$version"
 
 if [ ! $version ]; then
@@ -38,7 +38,7 @@ fi
 
 verify_system() {
   if ! [ -d /run/systemd ]; then
-    fatal 'Can not find systemd to use as a process supervisor for faasd'
+    fatal 'Can not find systemd to use as a process supervisor for fecore'
   fi
 }
 
@@ -59,7 +59,6 @@ install_required_packages() {
     # Debian bullseye is missing iptables. Added to required packages
     # to get it working in raspberry pi. No such known issues in
     # other distros. Hence, adding only to this block.
-    # reference: https://github.com/faasedge/core/pull/237
     $SUDO apt-get update -y
     $SUDO apt-get install -y curl runc bridge-utils iptables
   elif $(has_yum); then
@@ -102,7 +101,7 @@ install_containerd() {
   sleep 5
 }
 
-install_faasd() {
+install_fecore() {
   arch=$(uname -m)
   case $arch in
   x86_64 | amd64)
@@ -120,17 +119,17 @@ install_faasd() {
     ;;
   esac
 
-  $SUDO curl -fSLs "https://github.com/faasedge/core/releases/download/${version}/faasd${suffix}" --output "/usr/local/bin/faasd"
-  $SUDO chmod a+x "/usr/local/bin/faasd"
+  $SUDO curl -fSLs "https://github.gatech.edu/faasedge/fecore/releases/download/${version}/fecore${suffix}" --output "/usr/local/bin/fecore"
+  $SUDO chmod a+x "/usr/local/bin/fecore"
 
-  mkdir -p /tmp/faasd-${version}-installation/hack
-  cd /tmp/faasd-${version}-installation
-  $SUDO curl -fSLs "https://raw.githubusercontent.com/openfaas/faasd/${version}/docker-compose.yaml" --output "docker-compose.yaml"
-  $SUDO curl -fSLs "https://raw.githubusercontent.com/openfaas/faasd/${version}/prometheus.yml" --output "prometheus.yml"
-  $SUDO curl -fSLs "https://raw.githubusercontent.com/openfaas/faasd/${version}/resolv.conf" --output "resolv.conf"
-  $SUDO curl -fSLs "https://raw.githubusercontent.com/openfaas/faasd/${version}/hack/faasd-provider.service" --output "hack/faasd-provider.service"
-  $SUDO curl -fSLs "https://raw.githubusercontent.com/openfaas/faasd/${version}/hack/faasd.service" --output "hack/faasd.service"
-  $SUDO /usr/local/bin/faasd install
+  mkdir -p /tmp/fecore-${version}-installation/hack
+  cd /tmp/fecore-${version}-installation
+  $SUDO curl -fSLs "https://raw.githubusercontent.com/faasedge/fecore/${version}/docker-compose.yaml" --output "docker-compose.yaml"
+  $SUDO curl -fSLs "https://raw.githubusercontent.com/faasedge/fecore/${version}/prometheus.yml" --output "prometheus.yml"
+  $SUDO curl -fSLs "https://raw.githubusercontent.com/faasedge/fecore/${version}/resolv.conf" --output "resolv.conf"
+  $SUDO curl -fSLs "https://raw.githubusercontent.com/faasedge/fecore/${version}/hack/fecore-provider.service" --output "hack/fecore-provider.service"
+  $SUDO curl -fSLs "https://raw.githubusercontent.com/faasedge/fecore/${version}/hack/fecore.service" --output "hack/fecore.service"
+  $SUDO /usr/local/bin/fecore install
 }
 
 install_caddy() {
@@ -187,5 +186,5 @@ install_arkade
 install_cni_plugins
 install_containerd
 install_faas_cli
-install_faasd
+install_fecore
 install_caddy

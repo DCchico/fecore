@@ -10,7 +10,7 @@ import (
 	"path"
 	"strings"
 
-	provider "github.com/faasedge/core/pkg/provider"
+	provider "github.gatech.edu/faasedge/fecore/pkg/provider"
 	"github.com/openfaas/faas-provider/types"
 )
 

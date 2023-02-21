@@ -17,19 +17,19 @@ import (
 	flag "github.com/spf13/pflag"
 
 	units "github.com/docker/go-units"
-	"github.com/faasedge/core/pkg"
+	"github.gatech.edu/faasedge/fecore/pkg"
 )
 
-// upConfig are the CLI flags used by the `core up` command to deploy the core service
+// upConfig are the CLI flags used by the `fecore up` command to deploy the fecore service
 type upConfig struct {
-	// composeFilePath is the path to the compose file specifying the core service configuration
+	// composeFilePath is the path to the compose file specifying the fecore service configuration
 	// See https://compose-spec.io/ for more information about the spec,
 	//
 	// currently, this must be the name of a file in workingDir, which is set to the value of
-	// `corewd = /var/lib/core`
+	// `fecorewd = /var/lib/fecore`
 	composeFilePath string
 
-	// working directory to assume the compose file is in, should be corewd.
+	// working directory to assume the compose file is in, should be fecorewd.
 	// this is not configurable but may be in the future.
 	workingDir string
 }
@@ -40,7 +40,7 @@ func init() {
 
 var upCmd = &cobra.Command{
 	Use:   "up",
-	Short: "Start core",
+	Short: "Start fecore",
 	RunE:  runUp,
 }
 
@@ -88,7 +88,7 @@ func runUp(cmd *cobra.Command, _ []string) error {
 		sig := make(chan os.Signal, 1)
 		signal.Notify(sig, syscall.SIGTERM, syscall.SIGINT)
 
-		log.Printf("core: waiting for SIGTERM or SIGINT\n")
+		log.Printf("fecore: waiting for SIGTERM or SIGINT\n")
 		<-sig
 
 		log.Printf("Signal received.. shutting down server in %s\n", shutdownTimeout.String())
@@ -185,10 +185,10 @@ func loadServiceDefinition(cfg upConfig) ([]pkg.Service, error) {
 	return pkg.ParseCompose(serviceConfig)
 }
 
-// ConfigureUpFlags will define the flags for the `core up` command. The flag struct, configure, and
+// ConfigureUpFlags will define the flags for the `fecore up` command. The flag struct, configure, and
 // parse are split like this to simplify testability.
 func configureUpFlags(flags *flag.FlagSet) {
-	flags.StringP("file", "f", "docker-compose.yaml", "compose file specifying the core service configuration")
+	flags.StringP("file", "f", "docker-compose.yaml", "compose file specifying the fecore service configuration")
 }
 
 // ParseUpFlags will load the flag values into an upFlags object. Errors will be underlying
@@ -201,6 +201,6 @@ func parseUpFlags(cmd *cobra.Command) (upConfig, error) {
 	}
 
 	parsed.composeFilePath = path
-	parsed.workingDir = corewd
+	parsed.workingDir = fecorewd
 	return parsed, err
 }

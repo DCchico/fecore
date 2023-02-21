@@ -8,7 +8,7 @@ import (
 )
 
 // WelcomeMessage to introduce ofc-bootstrap
-const WelcomeMessage = "Welcome to FaasEdge-core or (core)"
+const WelcomeMessage = "FaasEdge Core (fecore)"
 
 func init() {
 	rootCommand.AddCommand(versionCmd)
@@ -29,7 +29,7 @@ var (
 	Version string
 )
 
-// Execute core
+// Execute fecore
 func Execute(version, gitCommit string) error {
 
 	// Get Version and GitCommit values from main.go.
@@ -43,15 +43,10 @@ func Execute(version, gitCommit string) error {
 }
 
 var rootCommand = &cobra.Command{
-	Use:   "core",
-	Short: "Start core",
+	Use:   "fecore",
+	Short: "Start fecore",
 	Long: `
-faasedge-core - Serverless For Everyone Else
-
-Learn how to build, secure, and monitor functions with core with 
-the eBook:
-
-https://gumroad.com/l/serverless-for-everyone-else
+faasedge-core
 `,
 	RunE:         runRootCommand,
 	SilenceUsage: true,
@@ -78,7 +73,7 @@ func parseBaseCommand(_ *cobra.Command, _ []string) {
 }
 
 func printVersion() {
-	fmt.Printf("core version: %s\tcommit: %s\n", GetVersion(), GitCommit)
+	fmt.Printf("fecore version: %s\tcommit: %s\n", GetVersion(), GitCommit)
 }
 
 func printLogo() {

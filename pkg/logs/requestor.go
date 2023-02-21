@@ -13,7 +13,7 @@ import (
 
 	"github.com/openfaas/faas-provider/logs"
 
-	core "github.com/faasedge/core/pkg"
+	fecore "github.gatech.edu/faasedge/fecore/pkg"
 )
 
 type requester struct{}
@@ -71,7 +71,7 @@ func buildCmd(ctx context.Context, req logs.Request) *exec.Cmd {
 
 	namespace := req.Namespace
 	if namespace == "" {
-		namespace = core.DefaultFunctionNamespace
+		namespace = fecore.DefaultFunctionNamespace
 	}
 
 	// find the description of the fields here

@@ -3,13 +3,13 @@
 
 set -e
 
-systemctl stop core
-systemctl stop core-provider
+systemctl stop fecore
+systemctl stop fecore-provider
 
 GO=/usr/local/go/bin/go
 $GO build
 
-cp core /usr/local/bin/ -f
+cp fecore /usr/local/bin/ -f
 
-systemctl start core
-systemctl start core-provider
+systemctl start fecore
+systemctl start fecore-provider

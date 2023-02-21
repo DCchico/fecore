@@ -6,7 +6,7 @@ import (
 	"os"
 	"path"
 
-	systemd "github.com/faasedge/core/pkg/systemd"
+	systemd "github.gatech.edu/faasedge/fecore/pkg/systemd"
 	"github.com/pkg/errors"
 
 	"github.com/spf13/cobra"
@@ -14,56 +14,56 @@ import (
 
 var installCmd = &cobra.Command{
 	Use:   "install",
-	Short: "Install core",
+	Short: "Install fecore",
 	RunE:  runInstall,
 }
 
 const workingDirectoryPermission = 0644
 
-const corewd = "/var/lib/core"
+const fecorewd = "/var/lib/fecore"
 
-const coreProviderWd = "/var/lib/core-provider"
+const fecoreProviderWd = "/var/lib/core-provider"
 
 func runInstall(_ *cobra.Command, _ []string) error {
 
-	if err := ensureWorkingDir(path.Join(corewd, "secrets")); err != nil {
+	if err := ensureWorkingDir(path.Join(fecorewd, "secrets")); err != nil {
 		return err
 	}
 
-	if err := ensureWorkingDir(coreProviderWd); err != nil {
+	if err := ensureWorkingDir(fecoreProviderWd); err != nil {
 		return err
 	}
 
-	if basicAuthErr := makeBasicAuthFiles(path.Join(corewd, "secrets")); basicAuthErr != nil {
+	if basicAuthErr := makeBasicAuthFiles(path.Join(fecorewd, "secrets")); basicAuthErr != nil {
 		return errors.Wrap(basicAuthErr, "cannot create basic-auth-* files")
 	}
 
-	if err := cp("docker-compose.yaml", corewd); err != nil {
+	if err := cp("docker-compose.yaml", fecorewd); err != nil {
 		return err
 	}
 
-	if err := cp("prometheus.yml", corewd); err != nil {
+	if err := cp("prometheus.yml", fecorewd); err != nil {
 		return err
 	}
 
-	if err := cp("resolv.conf", corewd); err != nil {
+	if err := cp("resolv.conf", fecorewd); err != nil {
 		return err
 	}
 
-	err := binExists("/usr/local/bin/", "core")
+	err := binExists("/usr/local/bin/", "fecore")
 	if err != nil {
 		return err
 	}
 
-	err = systemd.InstallUnit("core-provider", map[string]string{
-		"Cwd":             coreProviderWd,
-		"SecretMountPath": path.Join(corewd, "secrets")})
+	err = systemd.InstallUnit("fecore-provider", map[string]string{
+		"Cwd":             fecoreProviderWd,
+		"SecretMountPath": path.Join(fecorewd, "secrets")})
 
 	if err != nil {
 		return err
 	}
 
-	err = systemd.InstallUnit("core", map[string]string{"Cwd": corewd})
+	err = systemd.InstallUnit("fecore", map[string]string{"Cwd": fecorewd})
 	if err != nil {
 		return err
 	}
@@ -73,31 +73,31 @@ func runInstall(_ *cobra.Command, _ []string) error {
 		return err
 	}
 
-	err = systemd.Enable("core-provider")
+	err = systemd.Enable("fecore-provider")
 	if err != nil {
 		return err
 	}
 
-	err = systemd.Enable("core")
+	err = systemd.Enable("fecore")
 	if err != nil {
 		return err
 	}
 
-	err = systemd.Start("core-provider")
+	err = systemd.Start("fecore-provider")
 	if err != nil {
 		return err
 	}
 
-	err = systemd.Start("core")
+	err = systemd.Start("fecore")
 	if err != nil {
 		return err
 	}
 
 	fmt.Println(`Check status with:
-  sudo journalctl -u core --lines 100 -f
+  sudo journalctl -u fecore --lines 100 -f
 
 Login with:
-  sudo cat /var/lib/core/secrets/basic-auth-password | faas-cli login -s`)
+  sudo cat /var/lib/fecore/secrets/basic-auth-password | faas-cli login -s`)
 
 	return nil
 }
