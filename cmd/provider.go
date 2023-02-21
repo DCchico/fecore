@@ -15,9 +15,9 @@ import (
 	fecorelogs "github.gatech.edu/faasedge/fecore/pkg/logs"
 	"github.gatech.edu/faasedge/fecore/pkg/provider/config"
 	"github.gatech.edu/faasedge/fecore/pkg/provider/handlers"
+	"github.gatech.edu/faasedge/fecore/pkg/provider/proxy"
 	bootstrap "github.com/openfaas/faas-provider"
 	"github.com/openfaas/faas-provider/logs"
-	"github.com/openfaas/faas-provider/proxy"
 	"github.com/openfaas/faas-provider/types"
 	"github.com/spf13/cobra"
 )
