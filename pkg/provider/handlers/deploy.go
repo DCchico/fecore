@@ -18,11 +18,11 @@ import (
 	"github.com/containerd/containerd/oci"
 	gocni "github.com/containerd/go-cni"
 	"github.com/docker/distribution/reference"
-	cninetwork "github.gatech.edu/faasedge/fecore/pkg/cninetwork"
-	"github.gatech.edu/faasedge/fecore/pkg/service"
 	"github.com/opencontainers/runtime-spec/specs-go"
 	"github.com/openfaas/faas-provider/types"
 	"github.com/pkg/errors"
+	cninetwork "github.gatech.edu/faasedge/fecore/pkg/cninetwork"
+	"github.gatech.edu/faasedge/fecore/pkg/service"
 	"k8s.io/apimachinery/pkg/api/resource"
 )
 
@@ -76,12 +76,20 @@ func MakeDeployHandler(client *containerd.Client, cni gocni.CNI, secretMountPath
 		name := req.Service
 		ctx := namespaces.WithNamespace(context.Background(), namespace)
 
-		deployErr := deploy(ctx, req, client, cni, namespaceSecretMountPath, alwaysPull)
+		fn := Function{}
+		fn.name = name
+		fn.namespace = namespace
+		fn.secretsPath = secretMountPath
+		fn.activeReplicas = make(map[string]string)
+		fn.idleReplicas = make(map[string]string)
+
+		deployErr := deploy(ctx, req, client, cni, namespaceSecretMountPath, alwaysPull, &fn)
 		if deployErr != nil {
 			log.Printf("[Deploy] error deploying %s, error: %s\n", name, deployErr)
 			http.Error(w, deployErr.Error(), http.StatusBadRequest)
 			return
 		}
+		addDeployedFunction(&fn)
 	}
 }
 
@@ -113,36 +121,22 @@ func prepull(ctx context.Context, req types.FunctionDeployment, client *containe
 	return image, nil
 }
 
-func deploy(ctx context.Context, req types.FunctionDeployment, client *containerd.Client, cni gocni.CNI, secretMountPath string, alwaysPull bool) error {
-
-	snapshotter := ""
-	if val, ok := os.LookupEnv("snapshotter"); ok {
-		snapshotter = val
-	}
+func deploy(ctx context.Context, req types.FunctionDeployment, client *containerd.Client, cni gocni.CNI, secretMountPath string, alwaysPull bool, fn *Function) error {
 
 	image, err := prepull(ctx, req, client, alwaysPull)
 	if err != nil {
 		return err
 	}
+	fn.image = image.Name()
 
-	envs := prepareEnv(req.EnvProcess, req.EnvVars)
-	mounts := getOSMounts()
-
-	for _, secret := range req.Secrets {
-		mounts = append(mounts, specs.Mount{
-			Destination: path.Join("/var/openfaas/secrets", secret),
-			Type:        "bind",
-			Source:      path.Join(secretMountPath, secret),
-			Options:     []string{"rbind", "ro"},
-		})
-	}
-
-	name := req.Service
+	fn.envProcess = req.EnvProcess
+	fn.envVars = req.EnvVars
 
 	labels, err := buildLabels(&req)
 	if err != nil {
-		return fmt.Errorf("unable to apply labels to container: %s, error: %w", name, err)
+		return fmt.Errorf("[deploy] Unable to build labels for Function '%s': %w", fn.name, err)
 	}
+	fn.labels = labels
 
 	var memory *specs.LinuxMemory
 	if req.Limits != nil && len(req.Limits.Memory) > 0 {
@@ -150,33 +144,21 @@ func deploy(ctx context.Context, req types.FunctionDeployment, client *container
 
 		qty, err := resource.ParseQuantity(req.Limits.Memory)
 		if err != nil {
-			log.Printf("error parsing (%q) as quantity: %s", req.Limits.Memory, err.Error())
+			log.Printf("[deploy] Error parsing memory limit '%q' as quantity for Function '%s': %s", req.Limits.Memory, fn.name, err.Error())
 		}
 		v := qty.Value()
 		memory.Limit = &v
+		fn.memoryLimit = v
+	} else {
+		fn.memoryLimit = 0
 	}
-
-	container, err := client.NewContainer(
-		ctx,
-		name,
-		containerd.WithImage(image),
-		containerd.WithSnapshotter(snapshotter),
-		containerd.WithNewSnapshot(name+"-snapshot", image),
-		containerd.WithNewSpec(oci.WithImageConfig(image),
-			oci.WithHostname(name),
-			oci.WithCapabilities([]string{"CAP_NET_RAW"}),
-			oci.WithMounts(mounts),
-			oci.WithEnv(envs),
-			withMemory(memory)),
-		containerd.WithContainerLabels(labels),
-	)
-
-	if err != nil {
-		return fmt.Errorf("unable to create container: %s, error: %w", name, err)
+	replicaName, createReplicaStatus := createReplica(client, cni, fn, false)
+	if createReplicaStatus == nil {
+		log.Printf("[deploy] Created container '%s' for Function '%s'", replicaName, fn.name)
+	} else {
+		log.Printf("[deploy] Failed to create container for Function '%s'", fn.name)
 	}
-
-	return createTask(ctx, container, cni)
-
+	return createReplicaStatus
 }
 
 func buildLabels(request *types.FunctionDeployment) (map[string]string, error) {
