@@ -41,13 +41,17 @@ func MakeReplicaReaderHandler(client *containerd.Client) func(w http.ResponseWri
 		}
 
 		/* TODO: Look into how 'found' JSON is used by gateway to call Functions
-		 * (esp. wrt the 'AvailableReplicas' field) */
+		 * (esp. wrt the 'AvailableReplicas' field).
+		 * For now, hardcoding AvailableReplicas to a high number tricks the
+		 * Gateway's scaling logic into sending over the request w/o delay.
+		 * We want to implement explicit scaling requests in the future, but
+		 * for now we'll handle scaling interally via invoke_resolver.go */
 		if f, err := GetFunction(client, functionName, lookupNamespace); err == nil {
 			found := types.FunctionStatus{
 				Name:              functionName,
 				Image:             f.image,
-				AvailableReplicas: uint64(f.replicas),
-				Replicas:          uint64(f.replicas),
+				AvailableReplicas: 99,
+				Replicas:          uint64(f.replicas + 99),
 				Namespace:         f.namespace,
 				Labels:            &f.labels,
 				Annotations:       &f.annotations,
