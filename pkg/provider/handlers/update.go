@@ -92,7 +92,11 @@ func MakeUpdateHandler(client *containerd.Client, cni gocni.CNI, secretMountPath
 		// The pull has already been done in prepull, so we can force this pull to "false"
 		pull := false
 
-		if err := deploy(ctx, req, client, cni, namespaceSecretMountPath, pull); err != nil {
+		/* TODO: Replace fn w/ a real function - update handling code is stubbed
+		 * out for now. We need to add support for changing already deployed
+		 * Functions via this handler */
+		fn := Function{}
+		if err := deploy(ctx, req, client, cni, namespaceSecretMountPath, pull, &fn); err != nil {
 			log.Printf("[Update] error deploying %s, error: %s\n", name, err)
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
