@@ -22,7 +22,7 @@ const workingDirectoryPermission = 0644
 
 const fecorewd = "/var/lib/fecore"
 
-const fecoreProviderWd = "/var/lib/core-provider"
+const fecoreProviderWd = "/var/lib/fecore-provider"
 
 func runInstall(_ *cobra.Command, _ []string) error {
 

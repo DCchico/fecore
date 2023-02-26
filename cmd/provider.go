@@ -83,7 +83,7 @@ func makeProviderCmd() *cobra.Command {
 
 		defer client.Close()
 
-		invokeResolver := handlers.NewInvokeResolver(client)
+		invokeResolver := handlers.NewInvokeResolver(client, cni)
 
 		baseUserSecretsPath := path.Join(wd, "secrets")
 		if err := moveSecretsToDefaultNamespaceSecrets(
