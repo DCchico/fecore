@@ -4,6 +4,6 @@ set -e
 
 make local
 
-sudo cp fecore /usr/local/bin/ -f
+sudo cp bin/fecore /usr/local/bin/ -f
 
 sudo fecore install
