@@ -10,16 +10,16 @@ import (
 	"path"
 
 	"github.com/containerd/containerd"
+	bootstrap "github.com/openfaas/faas-provider"
+	"github.com/openfaas/faas-provider/logs"
+	"github.com/openfaas/faas-provider/types"
+	"github.com/spf13/cobra"
 	fecore "github.gatech.edu/faasedge/fecore/pkg"
 	"github.gatech.edu/faasedge/fecore/pkg/cninetwork"
 	fecorelogs "github.gatech.edu/faasedge/fecore/pkg/logs"
 	"github.gatech.edu/faasedge/fecore/pkg/provider/config"
 	"github.gatech.edu/faasedge/fecore/pkg/provider/handlers"
 	"github.gatech.edu/faasedge/fecore/pkg/provider/proxy"
-	bootstrap "github.com/openfaas/faas-provider"
-	"github.com/openfaas/faas-provider/logs"
-	"github.com/openfaas/faas-provider/types"
-	"github.com/spf13/cobra"
 )
 
 const secretDirPermission = 0755
@@ -83,7 +83,7 @@ func makeProviderCmd() *cobra.Command {
 
 		defer client.Close()
 
-		invokeResolver := handlers.NewInvokeResolver(client)
+		invokeResolver := handlers.NewInvokeResolver(client, cni)
 
 		baseUserSecretsPath := path.Join(wd, "secrets")
 		if err := moveSecretsToDefaultNamespaceSecrets(

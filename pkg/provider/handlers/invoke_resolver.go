@@ -19,8 +19,8 @@ type InvokeResolver struct {
 	cni    gocni.CNI
 }
 
-func NewInvokeResolver(client *containerd.Client) *InvokeResolver {
-	return &InvokeResolver{client: client}
+func NewInvokeResolver(client *containerd.Client, cni gocni.CNI) *InvokeResolver {
+	return &InvokeResolver{client: client, cni: cni}
 }
 
 func (i *InvokeResolver) Resolve(functionName string) (url.URL, error) {
