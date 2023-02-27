@@ -29,7 +29,7 @@ import (
 const annotationLabelPrefix = "com.openfaas.annotations."
 
 // MakeDeployHandler returns a handler to deploy a function
-func MakeDeployHandler(client *containerd.Client, cni gocni.CNI, secretMountPath string, alwaysPull bool) func(w http.ResponseWriter, r *http.Request) {
+func MakeDeployHandler(client *containerd.Client, cni gocni.CNI, secretMountPath string, alwaysPull bool, fs *FunctionStore) func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
 
 		if r.Body == nil {
@@ -89,7 +89,7 @@ func MakeDeployHandler(client *containerd.Client, cni gocni.CNI, secretMountPath
 			http.Error(w, deployErr.Error(), http.StatusBadRequest)
 			return
 		}
-		addDeployedFunction(&fn)
+		fs.AddDeployedFunction(&fn)
 	}
 }
 

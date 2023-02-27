@@ -8,18 +8,18 @@ import (
 	// "os"
 )
 
-type SQLiteRepository struct {
+type SQLiteStorageManager struct {
 	db *sql.DB
 }
 
-func NewSQLiteRepository(db *sql.DB) *SQLiteRepository {
+func NewSQLiteStorageManager(db *sql.DB) *SQLiteStorageManager {
 	// TODO add table creation code?
-	return &SQLiteRepository{
+	return &SQLiteStorageManager{
 		db: db,
 	}
 }
 
-func (r *SQLiteRepository) InsertContainer(container *Container) error {
+func (r *SQLiteStorageManager) InsertContainer(container *Container) error {
 	_, err := r.db.Exec("INSERT INTO Container(uuid, parentFunction) values(?, ?)", container.Uuid, container.ParentFunction)
 	if err != nil {
 		return err
@@ -28,7 +28,7 @@ func (r *SQLiteRepository) InsertContainer(container *Container) error {
 	return nil
 }
 
-func (r *SQLiteRepository) GetAllContainers() ([] Container, error) {
+func (r *SQLiteStorageManager) GetAllContainers() ([] Container, error) {
 	rows, err := r.db.Query("SELECT * FROM Container")
 	if err != nil {
 		return nil, err

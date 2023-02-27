@@ -83,7 +83,10 @@ func makeProviderCmd() *cobra.Command {
 
 		defer client.Close()
 
-		invokeResolver := handlers.NewInvokeResolver(client, cni)
+		// TODO init storage
+		fs, err := handlers.InitFunctionStore();
+
+		invokeResolver := handlers.NewInvokeResolver(client, cni, fs)
 
 		baseUserSecretsPath := path.Join(wd, "secrets")
 		if err := moveSecretsToDefaultNamespaceSecrets(
@@ -94,12 +97,12 @@ func makeProviderCmd() *cobra.Command {
 
 		bootstrapHandlers := types.FaaSHandlers{
 			FunctionProxy:        proxy.NewHandlerFunc(*config, invokeResolver),
-			DeleteHandler:        handlers.MakeDeleteHandler(client, cni),
-			DeployHandler:        handlers.MakeDeployHandler(client, cni, baseUserSecretsPath, alwaysPull),
-			FunctionReader:       handlers.MakeReadHandler(client),
-			ReplicaReader:        handlers.MakeReplicaReaderHandler(client),
+			DeleteHandler:        handlers.MakeDeleteHandler(client, cni, fs),
+			DeployHandler:        handlers.MakeDeployHandler(client, cni, baseUserSecretsPath, alwaysPull, fs),
+			FunctionReader:       handlers.MakeReadHandler(client, fs),
+			ReplicaReader:        handlers.MakeReplicaReaderHandler(client, fs),
 			ReplicaUpdater:       handlers.MakeReplicaUpdateHandler(client, cni),
-			UpdateHandler:        handlers.MakeUpdateHandler(client, cni, baseUserSecretsPath, alwaysPull),
+			UpdateHandler:        handlers.MakeUpdateHandler(client, cni, baseUserSecretsPath, alwaysPull, fs),
 			HealthHandler:        func(w http.ResponseWriter, r *http.Request) {},
 			InfoHandler:          handlers.MakeInfoHandler(Version, GitCommit),
 			ListNamespaceHandler: handlers.MakeNamespacesLister(client),
