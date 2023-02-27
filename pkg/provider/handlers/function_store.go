@@ -3,6 +3,8 @@ package handlers
 import (
 	"fmt"
 	"log"
+	
+	"github.gatech.edu/faasedge/fecore/pkg/provider/storage"
 )
 
 /*
@@ -14,11 +16,13 @@ import (
 type FunctionStore struct {
 	/* TODO: Add per-Function mutex for protecting Function modification */
 	DeployedFunctions map[string]*Function
+	StorageManager storage.StorageManager
 }
 
-func InitFunctionStore() (*FunctionStore, error) {
+func InitFunctionStore(storageManager storage.StorageManager) (*FunctionStore, error) {
 	fs := FunctionStore {
 		DeployedFunctions:  make(map[string]*Function),
+		StorageManager: storageManager,
 	}
 	// TODO init map from sql
 	return &fs, nil

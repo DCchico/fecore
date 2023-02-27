@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"database/sql"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -16,10 +17,12 @@ import (
 	"github.gatech.edu/faasedge/fecore/pkg/provider/config"
 	"github.gatech.edu/faasedge/fecore/pkg/provider/handlers"
 	"github.gatech.edu/faasedge/fecore/pkg/provider/proxy"
+	"github.gatech.edu/faasedge/fecore/pkg/provider/storage"
 	bootstrap "github.com/openfaas/faas-provider"
 	"github.com/openfaas/faas-provider/logs"
 	"github.com/openfaas/faas-provider/types"
 	"github.com/spf13/cobra"
+	_ "github.com/mattn/go-sqlite3"
 )
 
 const secretDirPermission = 0755
@@ -83,8 +86,16 @@ func makeProviderCmd() *cobra.Command {
 
 		defer client.Close()
 
-		// TODO init storage
-		fs, err := handlers.InitFunctionStore();
+		db, err := sql.Open("sqlite3", "sqlite.db")
+		if err != nil {
+			return err
+		}
+		storageManager, err := storage.NewSQLiteStorageManager(db)
+		if err != nil {
+			return err
+		}
+
+		fs, err := handlers.InitFunctionStore(storageManager);
 
 		invokeResolver := handlers.NewInvokeResolver(client, cni, fs)
 

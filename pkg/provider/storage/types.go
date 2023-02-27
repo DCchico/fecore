@@ -4,15 +4,15 @@ package storage
 
 type Function struct {
 	Name		string // unique
-	namespace	string
-	image		string
-	labels		string // json
-	annotations	string // json
-	secret		string // json
-	secretsPath	string
-	envVars		string // json
-	envProcess	string
-	memoryLimit	string
+	Namespace	string
+	Image		string
+	Labels		string // json
+	Annotations	string // json
+	Secret		string // json
+	SecretsPath	string
+	EnvVars		string // json
+	EnvProcess	string
+	MemoryLimit	string
 }
 
 type Container struct {
