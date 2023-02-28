@@ -19,11 +19,11 @@ type Function struct {
 	name           string
 	namespace      string
 	image          string
-	pid            uint32
+	pid            uint32 // not used
 	replicas       int
 	activeReplicas map[string]string
 	idleReplicas   map[string]string
-	IP             string
+	IP             string // not used
 	labels         map[string]string
 	annotations    map[string]string
 	secrets        []string
@@ -31,7 +31,7 @@ type Function struct {
 	envVars        map[string]string
 	envProcess     string
 	memoryLimit    int64
-	createdAt      time.Time
+	createdAt      time.Time // not used
 }
 
 

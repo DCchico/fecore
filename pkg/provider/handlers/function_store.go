@@ -3,7 +3,8 @@ package handlers
 import (
 	"fmt"
 	"log"
-	
+	"encoding/json"
+
 	"github.gatech.edu/faasedge/fecore/pkg/provider/storage"
 )
 
@@ -24,7 +25,27 @@ func InitFunctionStore(storageManager storage.StorageManager) (*FunctionStore, e
 		DeployedFunctions:  make(map[string]*Function),
 		StorageManager: storageManager,
 	}
-	// TODO init map from sql
+
+	sFns, err := storageManager.GetAllFunctions()
+	if err != nil {
+		return nil, err
+	}
+	
+	log.Println(sFns)
+	for _, sFn := range sFns {
+		fn := getFunction(&sFn)
+		cns, err := storageManager.GetContainersForFunction(fn.name)
+		log.Println(cns)
+		if err != nil {
+			return nil, err
+		}
+		for _, c := range cns {
+			fn.idleReplicas[c.Name] = c.Ip
+		}
+		fs.DeployedFunctions[fn.name] = &fn
+	}
+	log.Println(fs.DeployedFunctions)
+
 	return &fs, nil
 }
 
@@ -39,13 +60,6 @@ func (fs *FunctionStore) GetDeployedFunctions() ([]Function, error) {
 	return fns, nil
 }
 
-func (fs *FunctionStore) AddDeployedFunction(fn *Function) {
-	/* TODO: Add code to write deployed function to DB;
-	 * for now it stays in-memory via DeployedFunctions map */
-	fs.DeployedFunctions[fn.name] = fn
-	log.Printf("[addDeployedFunction] Added deployed function '%s' in namespace '%s'", fn.name, fn.namespace)
-}
-
 /* Gets a function's metadata from DB, creates/populates Function struct
  * and returns pointer to that struct 
  * TODO check namespace 
@@ -57,17 +71,40 @@ func (fs *FunctionStore) GetDeployedFunction(name string) (fn Function, err erro
 	return Function{}, fmt.Errorf("[GetDeployedFunction] Unable to get function from `store %s", name)
 }
 
+/* Add deployed function to the store */
+func (fs *FunctionStore) AddDeployedFunction(fn *Function) error {
+	fs.DeployedFunctions[fn.name] = fn
+	err := fs.StorageManager.InsertFunction(getStorageFunction(fn))
+	if err != nil {
+		return err
+	}
+	for _, c := range getContainers(fn) {
+		fs.StorageManager.InsertContainer(c)
+	}
+	if err != nil {
+		return err
+	}
+	log.Printf("[addDeployedFunction] Added deployed function '%s' in namespace '%s'", fn.name, fn.namespace)
+	return nil
+}
+
 /* Updates a function's metadata in DB */
 func (fs *FunctionStore) UpdateDeployedFunction(fn *Function) error {
 	log.Printf("[updateDeployedFunction] Updated metadata for deployed function '%s'", fn.name)
 	return nil
 }
 
-/* Remove function from DB */
+/* Remove function from store and db */
 func (fs *FunctionStore) RemoveDeployedFunction(name string) error {
-	/* TODO: Add code to remove Function from DB */
+	fn := fs.DeployedFunctions[name]
+	err := fs.StorageManager.DeleteFunction(name)
+	if err != nil {
+		return err
+	}
+	for _, c := range getContainers(fn) {
+		fs.StorageManager.DeleteContainer(c.Name)
+	}
 
-	/* For now, remove Function from in-memory map */
 	if _, ok := fs.DeployedFunctions[name]; ok {
 		delete(fs.DeployedFunctions, name)
 		log.Printf("[removeDeployedFunction] Removed deployed function '%s'", name)
@@ -89,4 +126,86 @@ func (fs *FunctionStore) GetIdleReplica(fn string) (string, string, error) {
 	delete(fs.DeployedFunctions[fn].idleReplicas, name)
 	fs.DeployedFunctions[fn].activeReplicas[name] = ip
 	return name, ip, nil
+}
+
+/* Adds new active replica */
+func (fs *FunctionStore) AddActiveReplica(fn string, cn string, ip string) error {
+	fs.DeployedFunctions[fn].activeReplicas[cn] = ip
+	err := fs.StorageManager.InsertContainer(storage.Container{Name: cn, ParentFunction: fn, Ip: ip})
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+/* Change container from active to inactive */
+func (fs *FunctionStore) UpdateReplicaStatusInactive(fn string, cn string) error {
+	if ip, ok := fs.DeployedFunctions[fn].activeReplicas[cn]; ok {
+		delete(fs.DeployedFunctions[fn].activeReplicas, cn)
+		fs.DeployedFunctions[fn].idleReplicas[cn] = ip
+	} else {
+		return fmt.Errorf("[UpdateReplicaStatusInactive] Unable to get function %s container %s in active set", fn, cn)
+	}
+
+	return nil
+}
+
+func getFunction(f *storage.Function) Function {
+	labels := map[string]string{}
+	json.Unmarshal([]byte(f.Labels), &labels)
+
+	annotations := map[string]string{}
+	json.Unmarshal([]byte(f.Annotations), &annotations)
+
+	envVars := map[string]string{}
+	json.Unmarshal([]byte(f.EnvVars), &annotations)
+
+	secrets := []string{}
+	json.Unmarshal([]byte(f.Secrets), &annotations)
+
+	return Function{
+		name: f.Name,
+		namespace: f.Namespace,
+		image: f.Image,
+		labels: labels,
+		idleReplicas: make(map[string]string),
+		activeReplicas: make(map[string]string),
+		annotations: annotations,
+		secrets: secrets,
+		secretsPath: f.SecretsPath,
+		envVars: envVars,
+		envProcess: f.EnvProcess,
+		memoryLimit: f.MemoryLimit,
+	}
+}
+
+func getStorageFunction(f *Function) storage.Function {
+	lables, _ := json.Marshal(f.labels)
+	annotations, _ := json.Marshal(f.annotations)
+	envVars, _ := json.Marshal(f.envVars)
+	secrets, _ := json.Marshal(f.secrets)
+
+	return storage.Function{
+		Name: f.name,
+		Namespace: f.namespace,
+		Image: f.image,
+		Labels: string(lables),
+		Annotations: string(annotations),
+		Secrets: string(secrets),
+		SecretsPath: f.secretsPath,
+		EnvVars: string(envVars),
+		EnvProcess: f.envProcess,
+		MemoryLimit: f.memoryLimit,
+	}
+}
+
+func getContainers(f *Function) []storage.Container {
+	var cns []storage.Container
+	for cname, ip := range f.activeReplicas {
+		cns = append(cns, storage.Container{Name: cname, ParentFunction: f.name, Ip: ip})
+	}
+	for cname, ip := range f.idleReplicas {
+		cns = append(cns, storage.Container{Name: cname, ParentFunction: f.name, Ip: ip})
+	}
+	return cns
 }

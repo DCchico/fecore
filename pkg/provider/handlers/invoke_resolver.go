@@ -63,6 +63,7 @@ func (i *InvokeResolver) Resolve(functionName string) (url.URL, error) {
 			return url.URL{}, err
 		} else {
 			replicaIP = function.activeReplicas[replicaName]
+			i.fs.AddActiveReplica(function.name, replicaName, replicaIP)
 			log.Printf("[Invoke] Using new replica '%s' @ %s for Function '%s'", replicaName, replicaIP, function.name)
 		}
 	}

@@ -8,16 +8,17 @@ type Function struct {
 	Image		string
 	Labels		string // json
 	Annotations	string // json
-	Secret		string // json
+	Secrets		string // []string
 	SecretsPath	string
 	EnvVars		string // json
 	EnvProcess	string
-	MemoryLimit	string
+	MemoryLimit	int64
 }
 
 type Container struct {
-	Uuid			string // unique
+	Name			string // unique
 	ParentFunction	string
+	Ip				string
 }
 
 type StorageManager interface {
@@ -26,6 +27,7 @@ type StorageManager interface {
 	DeleteFunction(name string) error
 
 	InsertContainer(container Container) error
+	GetContainersForFunction(name string) ([]Container, error)
 	GetAllContainers() ([]Container, error)
-	DeleteContainer(uuid string) error
+	DeleteContainer(name string) error
 }
