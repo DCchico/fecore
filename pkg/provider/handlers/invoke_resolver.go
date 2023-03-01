@@ -5,7 +5,6 @@ import (
 	"log"
 	"net/url"
 	"strings"
-	"time"
 
 	"github.com/containerd/containerd"
 	gocni "github.com/containerd/go-cni"
@@ -61,12 +60,7 @@ func (i *InvokeResolver) Resolve(functionName string) (url.URL, error) {
 			log.Printf("[Invoke] Using new replica '%s' @ %s for Function '%s'", replicaName, replicaIP, function.name)
 		}
 	}
-	/* TODO: Remove this time.Sleep() - this hack introduces an artificial delay
-	 * before a replica's IP is returned to the caller. Doing this is necessary because
-	 * we may return the IP address before the init program inside the container is listening
-	 * on port 8080 to receive connections. As a result, if we return the IP too early,
-	 * the proxy's connection attempt to the function fails */
-	time.Sleep(200 * time.Millisecond)
+
 	urlStr := fmt.Sprintf("http://%s:%d", replicaIP, watchdogPort)
 
 	urlRes, err := url.Parse(urlStr)
