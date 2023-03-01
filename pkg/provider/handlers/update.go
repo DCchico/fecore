@@ -17,7 +17,7 @@ import (
 	"github.gatech.edu/faasedge/fecore/pkg/service"
 )
 
-func MakeUpdateHandler(client *containerd.Client, cni gocni.CNI, secretMountPath string, alwaysPull bool) func(w http.ResponseWriter, r *http.Request) {
+func MakeUpdateHandler(client *containerd.Client, cni gocni.CNI, secretMountPath string, alwaysPull bool, fs *FunctionStore) func(w http.ResponseWriter, r *http.Request) {
 
 	return func(w http.ResponseWriter, r *http.Request) {
 
@@ -56,7 +56,7 @@ func MakeUpdateHandler(client *containerd.Client, cni gocni.CNI, secretMountPath
 
 		namespaceSecretMountPath := getNamespaceSecretMountPath(secretMountPath, namespace)
 
-		function, err := GetFunction(client, name, namespace)
+		function, err := fs.GetDeployedFunction(name);
 		if err != nil {
 			msg := fmt.Sprintf("service %s not found", name)
 			log.Printf("[Update] %s\n", msg)

@@ -16,7 +16,7 @@ import (
 	"github.gatech.edu/faasedge/fecore/pkg/service"
 )
 
-func MakeDeleteHandler(client *containerd.Client, cni gocni.CNI) func(w http.ResponseWriter, r *http.Request) {
+func MakeDeleteHandler(client *containerd.Client, cni gocni.CNI, fs *FunctionStore) func(w http.ResponseWriter, r *http.Request) {
 
 	return func(w http.ResponseWriter, r *http.Request) {
 
@@ -58,14 +58,15 @@ func MakeDeleteHandler(client *containerd.Client, cni gocni.CNI) func(w http.Res
 		ctx := namespaces.WithNamespace(context.Background(), lookupNamespace)
 
 		// Remove each Function replica
-		for rname := range DeployedFunctions[name].idleReplicas {
+		fn, err := fs.GetDeployedFunction(name);
+		for rname := range fn.idleReplicas {
 			deleteReplica(ctx, client, cni, rname)
 		}
-		for rname := range DeployedFunctions[name].activeReplicas {
+		for rname := range fn.activeReplicas {
 			deleteReplica(ctx, client, cni, rname)
 		}
 
-		removeDeployedFunction(name)
+		fs.RemoveDeployedFunction(name)
 
 		log.Printf("[Delete] Deleted Function '%s'\n", name)
 	}

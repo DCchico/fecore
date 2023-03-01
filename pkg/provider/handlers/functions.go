@@ -2,8 +2,8 @@ package handlers
 
 import (
 	"context"
-	"errors"
-	"fmt"
+	// "errors"
+	// "fmt"
 	"log"
 	"strings"
 	"time"
@@ -19,11 +19,11 @@ type Function struct {
 	name           string
 	namespace      string
 	image          string
-	pid            uint32
+	pid            uint32 // not used
 	replicas       int
 	activeReplicas map[string]string
 	idleReplicas   map[string]string
-	IP             string
+	IP             string // not used
 	labels         map[string]string
 	annotations    map[string]string
 	secrets        []string
@@ -31,58 +31,59 @@ type Function struct {
 	envVars        map[string]string
 	envProcess     string
 	memoryLimit    int64
-	createdAt      time.Time
+	createdAt      time.Time // not used
 }
 
-// ListFunctions returns a map of all functions with running tasks on namespace
-func ListFunctions(client *containerd.Client, namespace string) (map[string]*Function, error) {
 
-	// Check if namespace exists, and it has the proper label
-	valid, err := validNamespace(client.NamespaceService(), namespace)
-	if err != nil {
-		return nil, err
-	}
+// // ListFunctions returns a map of all functions with running tasks on namespace
+// func ListFunctions(client *containerd.Client, namespace string) (map[string]*Function, error) {
 
-	if !valid {
-		return nil, errors.New("namespace not valid")
-	}
+// 	// Check if namespace exists, and it has the proper label
+// 	valid, err := validNamespace(client.NamespaceService(), namespace)
+// 	if err != nil {
+// 		return nil, err
+// 	}
 
-	/* TODO: Eventually we will probably want to return the list of Functions
-	 * stored in the database. For now we'll return the in-memory KVS, since
-	 * the stock faasd code already expects this return value */
-	return DeployedFunctions, nil
-}
+// 	if !valid {
+// 		return nil, errors.New("namespace not valid")
+// 	}
 
-// GetFunction returns a function that matches name
-func GetFunction(client *containerd.Client, name string, namespace string) (Function, error) {
-	/* Quick and dirty code for maintaining the expected return type. This allows
-	 * us to avoid having to modify other functions that call this one.
-	 * We create an empty Function struct and populate it with values
-	 * from DeployedFunctions[name]
-	 * We also stub out unused values such as 'IP' and 'replicas' */
-	/* TODO: Look into making this more elegant and updating functions
-	 * that call this one */
-	fn := Function{}
-	if _, ok := DeployedFunctions[name]; ok {
-		fn.name = name
-		fn.namespace = DeployedFunctions[name].namespace
-		fn.image = DeployedFunctions[name].image
-		fn.pid = 0
-		fn.replicas = len(DeployedFunctions[name].idleReplicas)
-		fn.IP = "127.0.0.0"
-		fn.labels = DeployedFunctions[name].labels
-		fn.annotations = DeployedFunctions[name].annotations
-		fn.secrets = DeployedFunctions[name].secrets
-		fn.secretsPath = DeployedFunctions[name].secretsPath
-		fn.envVars = DeployedFunctions[name].envVars
-		fn.envProcess = DeployedFunctions[name].envProcess
-		fn.memoryLimit = DeployedFunctions[name].memoryLimit
-		fn.createdAt = DeployedFunctions[name].createdAt
-		return fn, nil
-	}
+// 	/* TODO: Eventually we will probably want to return the list of Functions
+// 	 * stored in the database. For now we'll return the in-memory KVS, since
+// 	 * the stock faasd code already expects this return value */
+// 	return DeployedFunctions, nil
+// }
 
-	return Function{}, fmt.Errorf("[GetFunction] Unable to find function '%s'", name)
-}
+// // GetFunction returns a function that matches name
+// func GetFunction(client *containerd.Client, name string, namespace string) (Function, error) {
+// 	/* Quick and dirty code for maintaining the expected return type. This allows
+// 	 * us to avoid having to modify other functions that call this one.
+// 	 * We create an empty Function struct and populate it with values
+// 	 * from DeployedFunctions[name]
+// 	 * We also stub out unused values such as 'IP' and 'replicas' */
+// 	/* TODO: Look into making this more elegant and updating functions
+// 	 * that call this one */
+// 	fn := Function{}
+// 	if _, ok := DeployedFunctions[name]; ok {
+// 		fn.name = name
+// 		fn.namespace = DeployedFunctions[name].namespace
+// 		fn.image = DeployedFunctions[name].image
+// 		fn.pid = 0
+// 		fn.replicas = len(DeployedFunctions[name].idleReplicas)
+// 		fn.IP = "127.0.0.0"
+// 		fn.labels = DeployedFunctions[name].labels
+// 		fn.annotations = DeployedFunctions[name].annotations
+// 		fn.secrets = DeployedFunctions[name].secrets
+// 		fn.secretsPath = DeployedFunctions[name].secretsPath
+// 		fn.envVars = DeployedFunctions[name].envVars
+// 		fn.envProcess = DeployedFunctions[name].envProcess
+// 		fn.memoryLimit = DeployedFunctions[name].memoryLimit
+// 		fn.createdAt = DeployedFunctions[name].createdAt
+// 		return fn, nil
+// 	}
+
+// 	return Function{}, fmt.Errorf("[GetFunction] Unable to find function '%s'", name)
+// }
 
 func readEnvFromProcessEnv(env []string) (map[string]string, string) {
 	foundEnv := make(map[string]string)

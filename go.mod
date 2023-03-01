@@ -29,6 +29,11 @@ require (
 )
 
 require (
+	github.com/google/uuid v1.3.0
+	github.com/mattn/go-sqlite3 v1.14.16
+)
+
+require (
 	github.com/Microsoft/go-winio v0.5.1 // indirect
 	github.com/Microsoft/hcsshim v0.9.4 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
@@ -46,12 +51,10 @@ require (
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect
 	github.com/golang/protobuf v1.5.2 // indirect
-	github.com/google/uuid v1.3.0 // indirect
 	github.com/imdario/mergo v0.3.12 // indirect
 	github.com/inconshreveable/mousetrap v1.0.0 // indirect
 	github.com/klauspost/compress v1.15.8 // indirect
 	github.com/mattn/go-shellwords v1.0.10 // indirect
-	github.com/mattn/go-sqlite3 v1.14.16 // indirect
 	github.com/matttproud/golang_protobuf_extensions v1.0.2-0.20181231171920-c182affec369 // indirect
 	github.com/mitchellh/mapstructure v1.4.2 // indirect
 	github.com/moby/locker v1.0.1 // indirect

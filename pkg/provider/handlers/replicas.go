@@ -21,7 +21,7 @@ import (
 	"github.gatech.edu/faasedge/fecore/pkg/service"
 )
 
-func MakeReplicaReaderHandler(client *containerd.Client) func(w http.ResponseWriter, r *http.Request) {
+func MakeReplicaReaderHandler(client *containerd.Client, fs *FunctionStore) func(w http.ResponseWriter, r *http.Request) {
 
 	return func(w http.ResponseWriter, r *http.Request) {
 		vars := mux.Vars(r)
@@ -46,7 +46,7 @@ func MakeReplicaReaderHandler(client *containerd.Client) func(w http.ResponseWri
 		 * Gateway's scaling logic into sending over the request w/o delay.
 		 * We want to implement explicit scaling requests in the future, but
 		 * for now we'll handle scaling interally via invoke_resolver.go */
-		if f, err := GetFunction(client, functionName, lookupNamespace); err == nil {
+		if f, err := fs.GetDeployedFunction(functionName); err == nil {
 			found := types.FunctionStatus{
 				Name:              functionName,
 				Image:             f.image,

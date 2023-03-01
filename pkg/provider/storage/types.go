@@ -4,20 +4,21 @@ package storage
 
 type Function struct {
 	Name		string // unique
-	namespace	string
-	image		string
-	labels		string // json
-	annotations	string // json
-	secret		string // json
-	secretsPath	string
-	envVars		string // json
-	envProcess	string
-	memoryLimit	string
+	Namespace	string
+	Image		string
+	Labels		string // json
+	Annotations	string // json
+	Secrets		string // []string
+	SecretsPath	string
+	EnvVars		string // json
+	EnvProcess	string
+	MemoryLimit	int64
 }
 
 type Container struct {
-	Uuid			string // unique
+	Name			string // unique
 	ParentFunction	string
+	Ip				string
 }
 
 type StorageManager interface {
@@ -26,6 +27,7 @@ type StorageManager interface {
 	DeleteFunction(name string) error
 
 	InsertContainer(container Container) error
+	GetContainersForFunction(name string) ([]Container, error)
 	GetAllContainers() ([]Container, error)
-	DeleteContainer(uuid string) error
+	DeleteContainer(name string) error
 }

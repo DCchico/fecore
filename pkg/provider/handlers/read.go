@@ -11,7 +11,7 @@ import (
 	"github.com/openfaas/faas-provider/types"
 )
 
-func MakeReadHandler(client *containerd.Client) func(w http.ResponseWriter, r *http.Request) {
+func MakeReadHandler(client *containerd.Client, fs *FunctionStore) func(w http.ResponseWriter, r *http.Request) {
 
 	return func(w http.ResponseWriter, r *http.Request) {
 
@@ -29,7 +29,7 @@ func MakeReadHandler(client *containerd.Client) func(w http.ResponseWriter, r *h
 		}
 
 		res := []types.FunctionStatus{}
-		fns, err := ListFunctions(client, lookupNamespace)
+		fns, err := fs.GetDeployedFunctions()
 		if err != nil {
 			log.Printf("[Read] error listing functions. Error: %s\n", err)
 			http.Error(w, err.Error(), http.StatusBadRequest)
