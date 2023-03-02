@@ -11,6 +11,7 @@ import (
 	"path"
 
 	"github.com/containerd/containerd"
+	_ "github.com/mattn/go-sqlite3"
 	bootstrap "github.com/openfaas/faas-provider"
 	"github.com/openfaas/faas-provider/logs"
 	"github.com/openfaas/faas-provider/types"
@@ -21,15 +22,7 @@ import (
 	"github.gatech.edu/faasedge/fecore/pkg/provider/config"
 	"github.gatech.edu/faasedge/fecore/pkg/provider/handlers"
 	"github.gatech.edu/faasedge/fecore/pkg/provider/proxy"
-<<<<<<< HEAD
-=======
 	"github.gatech.edu/faasedge/fecore/pkg/provider/storage"
-	bootstrap "github.com/openfaas/faas-provider"
-	"github.com/openfaas/faas-provider/logs"
-	"github.com/openfaas/faas-provider/types"
-	"github.com/spf13/cobra"
-	_ "github.com/mattn/go-sqlite3"
->>>>>>> origin/storage
 )
 
 const secretDirPermission = 0755
@@ -102,7 +95,7 @@ func makeProviderCmd() *cobra.Command {
 			return err
 		}
 
-		fs, err := handlers.InitFunctionStore(storageManager);
+		fs, err := handlers.InitFunctionStore(storageManager)
 
 		invokeResolver := handlers.NewInvokeResolver(client, cni, fs)
 
@@ -114,7 +107,7 @@ func makeProviderCmd() *cobra.Command {
 		}
 
 		bootstrapHandlers := types.FaaSHandlers{
-			FunctionProxy:        proxy.NewHandlerFunc(*config, invokeResolver),
+			FunctionProxy:        proxy.NewHandlerFunc(*config, invokeResolver, fs),
 			DeleteHandler:        handlers.MakeDeleteHandler(client, cni, fs),
 			DeployHandler:        handlers.MakeDeployHandler(client, cni, baseUserSecretsPath, alwaysPull, fs),
 			FunctionReader:       handlers.MakeReadHandler(client, fs),
