@@ -138,18 +138,26 @@ func (fs *FunctionStore) AddActiveReplica(fn string, cn string, ip string) error
 	return nil
 }
 
-/* Change container from active to inactive */
-func (fs *FunctionStore) UpdateReplicaStatusInactive(fn string, cn string) error {
-	if ip, ok := fs.DeployedFunctions[fn].activeReplicas[cn]; ok {
-		delete(fs.DeployedFunctions[fn].activeReplicas, cn)
-		fs.DeployedFunctions[fn].idleReplicas[cn] = ip
-	} else {
+/* Change container from active to inactive
+ * Note: lookup by ip and container name is not avaiable in resolver 
+ */
+func (fs *FunctionStore) UpdateReplicaStatusInactive(fn string, ip string) error {
+	cn := ""
+	for c, cIp := range fs.DeployedFunctions[fn].activeReplicas {
+		if cIp == ip {
+			cn = c
+			break
+		}
+	}
+	if cn == "" {
 		return fmt.Errorf("[UpdateReplicaStatusInactive] Unable to get function %s container %s in active set", fn, cn)
 	}
-
+	delete(fs.DeployedFunctions[fn].activeReplicas, cn)
+	fs.DeployedFunctions[fn].idleReplicas[cn] = ip	
 	return nil
 }
 
+/* Utility functions */
 func getFunction(f *storage.Function) Function {
 	labels := map[string]string{}
 	json.Unmarshal([]byte(f.Labels), &labels)

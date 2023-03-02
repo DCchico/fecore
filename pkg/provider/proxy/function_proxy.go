@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -15,6 +16,8 @@ import (
 	"github.com/openfaas/faas-provider/types"
 
 	"github.com/openfaas/faas-provider/proxy"
+
+	"github.gatech.edu/faasedge/fecore/pkg/provider/handlers"
 )
 
 const (
@@ -22,7 +25,7 @@ const (
 	defaultContentType = "text/plain"
 )
 
-func NewHandlerFunc(config types.FaaSConfig, resolver proxy.BaseURLResolver) http.HandlerFunc {
+func NewHandlerFunc(config types.FaaSConfig, resolver proxy.BaseURLResolver, fs *handlers.FunctionStore) http.HandlerFunc {
 	if resolver == nil {
 		panic("NewHandlerFunc: empty proxy handler resolver, cannot be nil")
 	}
@@ -42,7 +45,7 @@ func NewHandlerFunc(config types.FaaSConfig, resolver proxy.BaseURLResolver) htt
 			http.MethodGet,
 			http.MethodOptions,
 			http.MethodHead:
-			proxyRequest(w, r, proxyClient, resolver)
+			proxyRequest(w, r, proxyClient, resolver, fs)
 
 		default:
 			w.WriteHeader(http.StatusMethodNotAllowed)
@@ -51,7 +54,7 @@ func NewHandlerFunc(config types.FaaSConfig, resolver proxy.BaseURLResolver) htt
 }
 
 // proxyRequest handles the actual resolution of and then request to the function service.
-func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient *http.Client, resolver proxy.BaseURLResolver) {
+func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient *http.Client, resolver proxy.BaseURLResolver, fs *handlers.FunctionStore) {
 	ctx := originalReq.Context()
 
 	pathVars := mux.Vars(originalReq)
@@ -130,7 +133,14 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 	}
 
 	log.Printf("[function_proxy] Invocation of '%s' took %d ms\n", functionName, proxyElapsed.Milliseconds())
-	// TODO use the functionName and change active/inactive sets
+	ip := strings.Split(functionAddr.Host, ":")[0]
+	err = fs.UpdateReplicaStatusInactive(functionName, ip)
+	if err != nil {
+		log.Printf("[function_proxy] Unable to update function replica status '%s': %s\n", proxyReq.URL.String(), err.Error())
+
+		httputil.Errorf(w, http.StatusInternalServerError, "Can't reach service for '%s'", functionName)
+		return
+	}
 
 	clientHeader := w.Header()
 	copyHeaders(clientHeader, &response.Header)
