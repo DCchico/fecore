@@ -3,6 +3,7 @@ package handlers
 import (
 	"fmt"
 	"log"
+	"sync"
 	"encoding/json"
 
 	"github.gatech.edu/faasedge/fecore/pkg/provider/storage"
@@ -15,15 +16,16 @@ import (
 
 /* In-memory map for keeping track of functions that have been created */
 type FunctionStore struct {
-	/* TODO: Add per-Function mutex for protecting Function modification */
-	DeployedFunctions map[string]*Function
-	StorageManager storage.StorageManager
+	mu					sync.RWMutex // Added a rw mutex and things like reading the whole map require a global map anyways, TODO check if there are other strategies
+	deployedFunctions	map[string]*Function
+	storageManager		storage.StorageManager
 }
 
 func InitFunctionStore(storageManager storage.StorageManager) (*FunctionStore, error) {
 	fs := FunctionStore {
-		DeployedFunctions:  make(map[string]*Function),
-		StorageManager: storageManager,
+		mu: sync.RWMutex{},
+		deployedFunctions:  make(map[string]*Function),
+		storageManager: storageManager,
 	}
 
 	sFns, err := storageManager.GetAllFunctions()
@@ -42,9 +44,9 @@ func InitFunctionStore(storageManager storage.StorageManager) (*FunctionStore, e
 		for _, c := range cns {
 			fn.idleReplicas[c.Name] = c.Ip
 		}
-		fs.DeployedFunctions[fn.name] = &fn
+		fs.deployedFunctions[fn.name] = &fn
 	}
-	log.Println(fs.DeployedFunctions)
+	log.Println(fs.deployedFunctions)
 
 	return &fs, nil
 }
@@ -53,8 +55,10 @@ func InitFunctionStore(storageManager storage.StorageManager) (*FunctionStore, e
  * and returns pointer to that struct. 
  */
 func (fs *FunctionStore) GetDeployedFunctions() ([]Function, error) {
+	fs.mu.RLock()
+	defer fs.mu.RUnlock()
 	fns := make([]Function, 0)
-	for _, value := range fs.DeployedFunctions {
+	for _, value := range fs.deployedFunctions {
 		fns = append(fns, *value)
 	}
 	return fns, nil
@@ -65,7 +69,9 @@ func (fs *FunctionStore) GetDeployedFunctions() ([]Function, error) {
  * TODO check namespace 
  */
 func (fs *FunctionStore) GetDeployedFunction(name string) (fn Function, err error) {
-	if fn, ok := fs.DeployedFunctions[name]; ok {
+	fs.mu.RLock()
+	defer fs.mu.RUnlock()
+	if fn, ok := fs.deployedFunctions[name]; ok {
 		return *fn, nil
 	}
 	return Function{}, fmt.Errorf("[GetDeployedFunction] Unable to get function from `store %s", name)
@@ -73,17 +79,19 @@ func (fs *FunctionStore) GetDeployedFunction(name string) (fn Function, err erro
 
 /* Add deployed function to the store */
 func (fs *FunctionStore) AddDeployedFunction(fn *Function) error {
-	fs.DeployedFunctions[fn.name] = fn
-	err := fs.StorageManager.InsertFunction(getStorageFunction(fn))
+	err := fs.storageManager.InsertFunction(getStorageFunction(fn))
 	if err != nil {
 		return err
 	}
 	for _, c := range getContainers(fn) {
-		fs.StorageManager.InsertContainer(c)
+		err = fs.storageManager.InsertContainer(c)
+		if err != nil {
+			return err
+		}
 	}
-	if err != nil {
-		return err
-	}
+	fs.mu.Lock()
+	fs.deployedFunctions[fn.name] = fn
+	fs.mu.Unlock()
 	log.Printf("[addDeployedFunction] Added deployed function '%s' in namespace '%s'", fn.name, fn.namespace)
 	return nil
 }
@@ -96,17 +104,22 @@ func (fs *FunctionStore) UpdateDeployedFunction(fn *Function) error {
 
 /* Remove function from store and db */
 func (fs *FunctionStore) RemoveDeployedFunction(name string) error {
-	fn := fs.DeployedFunctions[name]
-	err := fs.StorageManager.DeleteFunction(name)
+	fs.mu.RLock()
+	fn := fs.deployedFunctions[name]
+	fs.mu.RUnlock()
+
+	err := fs.storageManager.DeleteFunction(name)
 	if err != nil {
 		return err
 	}
 	for _, c := range getContainers(fn) {
-		fs.StorageManager.DeleteContainer(c.Name)
+		fs.storageManager.DeleteContainer(c.Name)
 	}
 
-	if _, ok := fs.DeployedFunctions[name]; ok {
-		delete(fs.DeployedFunctions, name)
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+	if _, ok := fs.deployedFunctions[name]; ok {
+		delete(fs.deployedFunctions, name)
 		log.Printf("[removeDeployedFunction] Removed deployed function '%s'", name)
 		return nil
 	}
@@ -116,25 +129,31 @@ func (fs *FunctionStore) RemoveDeployedFunction(name string) error {
 /* Gets the container name of an idle (warm) Function replica and sets the
  * container replica to Active */
 func (fs *FunctionStore) GetIdleReplica(fn string) (string, string, error) {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+
 	var name string
 	var ip string
-	for k, v := range fs.DeployedFunctions[fn].idleReplicas {
+	for k, v := range fs.deployedFunctions[fn].idleReplicas {
 		name = k
 		ip = v
 		break
 	}
-	delete(fs.DeployedFunctions[fn].idleReplicas, name)
-	fs.DeployedFunctions[fn].activeReplicas[name] = ip
+	delete(fs.deployedFunctions[fn].idleReplicas, name)
+	fs.deployedFunctions[fn].activeReplicas[name] = ip
 	return name, ip, nil
 }
 
 /* Adds new active replica */
 func (fs *FunctionStore) AddActiveReplica(fn string, cn string, ip string) error {
-	fs.DeployedFunctions[fn].activeReplicas[cn] = ip
-	err := fs.StorageManager.InsertContainer(storage.Container{Name: cn, ParentFunction: fn, Ip: ip})
+	err := fs.storageManager.InsertContainer(storage.Container{Name: cn, ParentFunction: fn, Ip: ip})
 	if err != nil {
 		return err
 	}
+	fs.mu.Lock()
+	fs.deployedFunctions[fn].activeReplicas[cn] = ip
+	fs.mu.Unlock()
+
 	return nil
 }
 
@@ -142,8 +161,11 @@ func (fs *FunctionStore) AddActiveReplica(fn string, cn string, ip string) error
  * Note: lookup by ip and container name is not avaiable in resolver 
  */
 func (fs *FunctionStore) UpdateReplicaStatusInactive(fn string, ip string) error {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+
 	cn := ""
-	for c, cIp := range fs.DeployedFunctions[fn].activeReplicas {
+	for c, cIp := range fs.deployedFunctions[fn].activeReplicas {
 		if cIp == ip {
 			cn = c
 			break
@@ -152,8 +174,8 @@ func (fs *FunctionStore) UpdateReplicaStatusInactive(fn string, ip string) error
 	if cn == "" {
 		return fmt.Errorf("[UpdateReplicaStatusInactive] Unable to get function %s container %s in active set", fn, cn)
 	}
-	delete(fs.DeployedFunctions[fn].activeReplicas, cn)
-	fs.DeployedFunctions[fn].idleReplicas[cn] = ip	
+	delete(fs.deployedFunctions[fn].activeReplicas, cn)
+	fs.deployedFunctions[fn].idleReplicas[cn] = ip	
 	return nil
 }
 
