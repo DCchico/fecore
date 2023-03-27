@@ -2,8 +2,8 @@ package handlers
 
 import (
 	"context"
-	"errors"
-	"fmt"
+	// "errors"
+	// "fmt"
 	"log"
 	"strings"
 	"time"
@@ -11,137 +11,79 @@ import (
 	"github.com/opencontainers/runtime-spec/specs-go"
 
 	"github.com/containerd/containerd"
-	"github.com/containerd/containerd/namespaces"
 	"github.gatech.edu/faasedge/fecore/pkg"
 	fecore "github.gatech.edu/faasedge/fecore/pkg"
-	"github.gatech.edu/faasedge/fecore/pkg/cninetwork"
 )
 
 type Function struct {
-	name        string
-	namespace   string
-	image       string
-	pid         uint32
-	replicas    int
-	IP          string
-	labels      map[string]string
-	annotations map[string]string
-	secrets     []string
-	envVars     map[string]string
-	envProcess  string
-	memoryLimit int64
-	createdAt   time.Time
+	name           string
+	namespace      string
+	image          string
+	pid            uint32 // not used
+	replicas       int
+	activeReplicas map[string]string
+	idleReplicas   map[string]string
+	IP             string // not used
+	labels         map[string]string
+	annotations    map[string]string
+	secrets        []string
+	secretsPath    string
+	envVars        map[string]string
+	envProcess     string
+	memoryLimit    int64
+	createdAt      time.Time // not used
 }
 
-// ListFunctions returns a map of all functions with running tasks on namespace
-func ListFunctions(client *containerd.Client, namespace string) (map[string]*Function, error) {
 
-	// Check if namespace exists, and it has the openfaas label
-	valid, err := validNamespace(client.NamespaceService(), namespace)
-	if err != nil {
-		return nil, err
-	}
+// // ListFunctions returns a map of all functions with running tasks on namespace
+// func ListFunctions(client *containerd.Client, namespace string) (map[string]*Function, error) {
 
-	if !valid {
-		return nil, errors.New("namespace not valid")
-	}
+// 	// Check if namespace exists, and it has the proper label
+// 	valid, err := validNamespace(client.NamespaceService(), namespace)
+// 	if err != nil {
+// 		return nil, err
+// 	}
 
-	ctx := namespaces.WithNamespace(context.Background(), namespace)
-	functions := make(map[string]*Function)
+// 	if !valid {
+// 		return nil, errors.New("namespace not valid")
+// 	}
 
-	containers, err := client.Containers(ctx)
-	if err != nil {
-		return functions, err
-	}
+// 	/* TODO: Eventually we will probably want to return the list of Functions
+// 	 * stored in the database. For now we'll return the in-memory KVS, since
+// 	 * the stock faasd code already expects this return value */
+// 	return DeployedFunctions, nil
+// }
 
-	for _, c := range containers {
-		name := c.ID()
-		f, err := GetFunction(client, name, namespace)
-		if err != nil {
-			log.Printf("skipping %s, error: %s", name, err)
-		} else {
-			functions[name] = &f
-		}
-	}
+// // GetFunction returns a function that matches name
+// func GetFunction(client *containerd.Client, name string, namespace string) (Function, error) {
+// 	/* Quick and dirty code for maintaining the expected return type. This allows
+// 	 * us to avoid having to modify other functions that call this one.
+// 	 * We create an empty Function struct and populate it with values
+// 	 * from DeployedFunctions[name]
+// 	 * We also stub out unused values such as 'IP' and 'replicas' */
+// 	/* TODO: Look into making this more elegant and updating functions
+// 	 * that call this one */
+// 	fn := Function{}
+// 	if _, ok := DeployedFunctions[name]; ok {
+// 		fn.name = name
+// 		fn.namespace = DeployedFunctions[name].namespace
+// 		fn.image = DeployedFunctions[name].image
+// 		fn.pid = 0
+// 		fn.replicas = len(DeployedFunctions[name].idleReplicas)
+// 		fn.IP = "127.0.0.0"
+// 		fn.labels = DeployedFunctions[name].labels
+// 		fn.annotations = DeployedFunctions[name].annotations
+// 		fn.secrets = DeployedFunctions[name].secrets
+// 		fn.secretsPath = DeployedFunctions[name].secretsPath
+// 		fn.envVars = DeployedFunctions[name].envVars
+// 		fn.envProcess = DeployedFunctions[name].envProcess
+// 		fn.memoryLimit = DeployedFunctions[name].memoryLimit
+// 		fn.createdAt = DeployedFunctions[name].createdAt
+// 		return fn, nil
+// 	}
 
-	return functions, nil
-}
-
-// GetFunction returns a function that matches name
-func GetFunction(client *containerd.Client, name string, namespace string) (Function, error) {
-	ctx := namespaces.WithNamespace(context.Background(), namespace)
-	fn := Function{}
-
-	c, err := client.LoadContainer(ctx, name)
-	if err != nil {
-		return Function{}, fmt.Errorf("unable to find function: %s, error %w", name, err)
-	}
-
-	image, err := c.Image(ctx)
-	if err != nil {
-		return fn, err
-	}
-
-	containerName := c.ID()
-	allLabels, labelErr := c.Labels(ctx)
-
-	if labelErr != nil {
-		log.Printf("cannot list container %s labels: %s", containerName, labelErr)
-	}
-
-	labels, annotations := buildLabelsAndAnnotations(allLabels)
-
-	spec, err := c.Spec(ctx)
-	if err != nil {
-		return Function{}, fmt.Errorf("unable to load function %s error: %w", name, err)
-	}
-
-	info, err := c.Info(ctx)
-	if err != nil {
-		return Function{}, fmt.Errorf("can't load info for: %s, error %w", name, err)
-	}
-
-	envVars, envProcess := readEnvFromProcessEnv(spec.Process.Env)
-	secrets := readSecretsFromMounts(spec.Mounts)
-
-	fn.name = containerName
-	fn.namespace = namespace
-	fn.image = image.Name()
-	fn.labels = labels
-	fn.annotations = annotations
-	fn.secrets = secrets
-	fn.envVars = envVars
-	fn.envProcess = envProcess
-	fn.createdAt = info.CreatedAt
-	fn.memoryLimit = readMemoryLimitFromSpec(spec)
-
-	replicas := 0
-	task, err := c.Task(ctx, nil)
-	if err == nil {
-		// Task for container exists
-		svc, err := task.Status(ctx)
-		if err != nil {
-			return Function{}, fmt.Errorf("unable to get task status for container: %s %w", name, err)
-		}
-
-		if svc.Status == "running" {
-			replicas = 1
-			fn.pid = task.Pid()
-
-			// Get container IP address
-			ip, err := cninetwork.GetIPAddress(name, task.Pid())
-			if err != nil {
-				return Function{}, err
-			}
-			fn.IP = ip
-		}
-	} else {
-		replicas = 0
-	}
-
-	fn.replicas = replicas
-	return fn, nil
-}
+// 	return Function{}, fmt.Errorf("[GetFunction] Unable to find function '%s'", name)
+// }
 
 func readEnvFromProcessEnv(env []string) (map[string]string, string) {
 	foundEnv := make(map[string]string)

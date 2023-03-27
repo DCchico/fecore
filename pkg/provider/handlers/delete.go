@@ -3,7 +3,6 @@ package handlers
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -17,7 +16,7 @@ import (
 	"github.gatech.edu/faasedge/fecore/pkg/service"
 )
 
-func MakeDeleteHandler(client *containerd.Client, cni gocni.CNI) func(w http.ResponseWriter, r *http.Request) {
+func MakeDeleteHandler(client *containerd.Client, cni gocni.CNI, fs *FunctionStore) func(w http.ResponseWriter, r *http.Request) {
 
 	return func(w http.ResponseWriter, r *http.Request) {
 
@@ -56,31 +55,35 @@ func MakeDeleteHandler(client *containerd.Client, cni gocni.CNI) func(w http.Res
 
 		name := req.FunctionName
 
-		function, err := GetFunction(client, name, lookupNamespace)
-		if err != nil {
-			msg := fmt.Sprintf("service %s not found", name)
-			log.Printf("[Delete] %s\n", msg)
-			http.Error(w, msg, http.StatusNotFound)
-			return
-		}
-
 		ctx := namespaces.WithNamespace(context.Background(), lookupNamespace)
 
-		// TODO: this needs to still happen if the task is paused
-		if function.replicas != 0 {
-			err = cninetwork.DeleteCNINetwork(ctx, cni, client, name)
-			if err != nil {
-				log.Printf("[Delete] error removing CNI network for %s, %s\n", name, err)
-			}
+		// Remove each Function replica
+		fn, err := fs.GetDeployedFunction(name);
+		for rname := range fn.idleReplicas {
+			deleteReplica(ctx, client, cni, rname)
+		}
+		for rname := range fn.activeReplicas {
+			deleteReplica(ctx, client, cni, rname)
 		}
 
-		containerErr := service.Remove(ctx, client, name)
-		if containerErr != nil {
-			log.Printf("[Delete] error removing %s, %s\n", name, containerErr)
-			http.Error(w, containerErr.Error(), http.StatusInternalServerError)
-			return
-		}
+		fs.RemoveDeployedFunction(name)
 
-		log.Printf("[Delete] deleted %s\n", name)
+		log.Printf("[Delete] Deleted Function '%s'\n", name)
 	}
+}
+
+func deleteReplica(ctx context.Context, client *containerd.Client, cni gocni.CNI, name string) error {
+
+	networkErr := cninetwork.DeleteCNINetwork(ctx, cni, client, name)
+	if networkErr != nil {
+		log.Printf("[deleteReplica] Error removing network for Function '%s': %s\n", name, networkErr)
+	}
+
+	containerErr := service.Remove(ctx, client, name)
+	if containerErr != nil {
+		log.Printf("[deleteReplica] Error removing replica container '%s': %s\n", name, containerErr)
+		return containerErr
+	}
+	log.Printf("[deleteReplica] Removed replica container: '%s'\n", name)
+	return nil
 }

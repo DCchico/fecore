@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -15,6 +16,8 @@ import (
 	"github.com/openfaas/faas-provider/types"
 
 	"github.com/openfaas/faas-provider/proxy"
+
+	"github.gatech.edu/faasedge/fecore/pkg/provider/handlers"
 )
 
 const (
@@ -22,7 +25,7 @@ const (
 	defaultContentType = "text/plain"
 )
 
-func NewHandlerFunc(config types.FaaSConfig, resolver proxy.BaseURLResolver) http.HandlerFunc {
+func NewHandlerFunc(config types.FaaSConfig, resolver proxy.BaseURLResolver, fs *handlers.FunctionStore) http.HandlerFunc {
 	if resolver == nil {
 		panic("NewHandlerFunc: empty proxy handler resolver, cannot be nil")
 	}
@@ -42,7 +45,7 @@ func NewHandlerFunc(config types.FaaSConfig, resolver proxy.BaseURLResolver) htt
 			http.MethodGet,
 			http.MethodOptions,
 			http.MethodHead:
-			proxyRequest(w, r, proxyClient, resolver)
+			proxyRequest(w, r, proxyClient, resolver, fs)
 
 		default:
 			w.WriteHeader(http.StatusMethodNotAllowed)
@@ -51,7 +54,7 @@ func NewHandlerFunc(config types.FaaSConfig, resolver proxy.BaseURLResolver) htt
 }
 
 // proxyRequest handles the actual resolution of and then request to the function service.
-func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient *http.Client, resolver proxy.BaseURLResolver) {
+func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient *http.Client, resolver proxy.BaseURLResolver, fs *handlers.FunctionStore) {
 	ctx := originalReq.Context()
 
 	pathVars := mux.Vars(originalReq)
@@ -69,7 +72,9 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 		return
 	}
 
-	proxyReq, err := buildProxyRequest(originalReq, functionAddr, pathVars["params"])
+	var proxyReq *http.Request
+	var err error
+	proxyReq, err = buildProxyRequest(originalReq, functionAddr, pathVars["params"])
 	if err != nil {
 		httputil.Errorf(w, http.StatusInternalServerError, "Failed to resolve service: %s.", functionName)
 		return
@@ -79,14 +84,47 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 		defer proxyReq.Body.Close()
 	}
 
-	start := time.Now()
-	response, err := proxyClient.Do(proxyReq.WithContext(ctx))
-	seconds := time.Since(start)
+	proxyStart := time.Now()
+	var response *http.Response
+	maxRetries := 20
+	connectionRetries := 0
+	sleepQuantum := 5
+
+	/* First, try and establish connection to port 8080 */
+	for connectionRetries < maxRetries {
+		response, err = proxyClient.Do(proxyReq.WithContext(ctx))
+		if err != nil {
+			time.Sleep(time.Duration(sleepQuantum) * time.Millisecond)
+			sleepQuantum += 5
+			connectionRetries += 1
+		} else {
+			log.Printf("[retryProxyRequest] Took %d tries to contact Function on port 8080", connectionRetries)
+			break
+		}
+	}
+	log.Printf("[retryProxyRequest] First return code received from proxyClient is %d", response.StatusCode)
+	/* Once connected, keep trying to send the request until we no longer get
+	 * HTTP 500 (Internal Server Error) as response */
+	if response.StatusCode == 500 {
+		sleepQuantum = 5
+		for connectionRetries = 0; connectionRetries < maxRetries; connectionRetries += 1 {
+			response, err = proxyClient.Do(proxyReq.WithContext(ctx))
+			if response.StatusCode != 500 {
+				break
+			}
+			time.Sleep(time.Duration(sleepQuantum) * time.Millisecond)
+			sleepQuantum += 5
+		}
+		log.Printf("[retryProxyRequest] Tried %d tries to get non-HTTP 500 reply from Function", connectionRetries)
+	}
+	log.Printf("[retryProxyRequest] Last return code received from proxyClient is %d", response.StatusCode)
+
+	proxyElapsed := time.Since(proxyStart)
 
 	if err != nil {
-		log.Printf("error with proxy request to: %s, %s\n", proxyReq.URL.String(), err.Error())
+		log.Printf("[function_proxy] error with proxy request to '%s': %s\n", proxyReq.URL.String(), err.Error())
 
-		httputil.Errorf(w, http.StatusInternalServerError, "Can't reach service for: %s.", functionName)
+		httputil.Errorf(w, http.StatusInternalServerError, "Can't reach service for '%s'", functionName)
 		return
 	}
 
@@ -94,8 +132,15 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 		defer response.Body.Close()
 	}
 
-	log.Printf("%s took %f seconds\n", functionName, seconds.Seconds())
-	// TODO use the functionName and change active/inactive sets
+	log.Printf("[function_proxy] Invocation of '%s' took %d ms\n", functionName, proxyElapsed.Milliseconds())
+	ip := strings.Split(functionAddr.Host, ":")[0]
+	err = fs.UpdateReplicaStatusInactive(functionName, ip)
+	if err != nil {
+		log.Printf("[function_proxy] Unable to update function replica status '%s': %s\n", proxyReq.URL.String(), err.Error())
+
+		httputil.Errorf(w, http.StatusInternalServerError, "Can't reach service for '%s'", functionName)
+		return
+	}
 
 	clientHeader := w.Header()
 	copyHeaders(clientHeader, &response.Header)

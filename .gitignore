@@ -1,6 +1,6 @@
 /fecore
 hosts
-/resolv.conf
+# /resolv.conf
 .idea/
 
 basic-auth-user

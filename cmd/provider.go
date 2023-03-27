@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"database/sql"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -10,16 +11,18 @@ import (
 	"path"
 
 	"github.com/containerd/containerd"
+	_ "github.com/mattn/go-sqlite3"
+	bootstrap "github.com/openfaas/faas-provider"
+	"github.com/openfaas/faas-provider/logs"
+	"github.com/openfaas/faas-provider/types"
+	"github.com/spf13/cobra"
 	fecore "github.gatech.edu/faasedge/fecore/pkg"
 	"github.gatech.edu/faasedge/fecore/pkg/cninetwork"
 	fecorelogs "github.gatech.edu/faasedge/fecore/pkg/logs"
 	"github.gatech.edu/faasedge/fecore/pkg/provider/config"
 	"github.gatech.edu/faasedge/fecore/pkg/provider/handlers"
 	"github.gatech.edu/faasedge/fecore/pkg/provider/proxy"
-	bootstrap "github.com/openfaas/faas-provider"
-	"github.com/openfaas/faas-provider/logs"
-	"github.com/openfaas/faas-provider/types"
-	"github.com/spf13/cobra"
+	"github.gatech.edu/faasedge/fecore/pkg/provider/storage"
 )
 
 const secretDirPermission = 0755
@@ -83,7 +86,18 @@ func makeProviderCmd() *cobra.Command {
 
 		defer client.Close()
 
-		invokeResolver := handlers.NewInvokeResolver(client)
+		db, err := sql.Open("sqlite3", "sqlite.db")
+		if err != nil {
+			return err
+		}
+		storageManager, err := storage.NewSQLiteStorageManager(db)
+		if err != nil {
+			return err
+		}
+
+		fs, err := handlers.InitFunctionStore(storageManager)
+
+		invokeResolver := handlers.NewInvokeResolver(client, cni, fs)
 
 		baseUserSecretsPath := path.Join(wd, "secrets")
 		if err := moveSecretsToDefaultNamespaceSecrets(
@@ -93,13 +107,13 @@ func makeProviderCmd() *cobra.Command {
 		}
 
 		bootstrapHandlers := types.FaaSHandlers{
-			FunctionProxy:        proxy.NewHandlerFunc(*config, invokeResolver),
-			DeleteHandler:        handlers.MakeDeleteHandler(client, cni),
-			DeployHandler:        handlers.MakeDeployHandler(client, cni, baseUserSecretsPath, alwaysPull),
-			FunctionReader:       handlers.MakeReadHandler(client),
-			ReplicaReader:        handlers.MakeReplicaReaderHandler(client),
+			FunctionProxy:        proxy.NewHandlerFunc(*config, invokeResolver, fs),
+			DeleteHandler:        handlers.MakeDeleteHandler(client, cni, fs),
+			DeployHandler:        handlers.MakeDeployHandler(client, cni, baseUserSecretsPath, alwaysPull, fs),
+			FunctionReader:       handlers.MakeReadHandler(client, fs),
+			ReplicaReader:        handlers.MakeReplicaReaderHandler(client, fs),
 			ReplicaUpdater:       handlers.MakeReplicaUpdateHandler(client, cni),
-			UpdateHandler:        handlers.MakeUpdateHandler(client, cni, baseUserSecretsPath, alwaysPull),
+			UpdateHandler:        handlers.MakeUpdateHandler(client, cni, baseUserSecretsPath, alwaysPull, fs),
 			HealthHandler:        func(w http.ResponseWriter, r *http.Request) {},
 			InfoHandler:          handlers.MakeInfoHandler(Version, GitCommit),
 			ListNamespaceHandler: handlers.MakeNamespacesLister(client),

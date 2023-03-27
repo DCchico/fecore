@@ -17,7 +17,7 @@ import (
 	"github.gatech.edu/faasedge/fecore/pkg/service"
 )
 
-func MakeUpdateHandler(client *containerd.Client, cni gocni.CNI, secretMountPath string, alwaysPull bool) func(w http.ResponseWriter, r *http.Request) {
+func MakeUpdateHandler(client *containerd.Client, cni gocni.CNI, secretMountPath string, alwaysPull bool, fs *FunctionStore) func(w http.ResponseWriter, r *http.Request) {
 
 	return func(w http.ResponseWriter, r *http.Request) {
 
@@ -56,7 +56,7 @@ func MakeUpdateHandler(client *containerd.Client, cni gocni.CNI, secretMountPath
 
 		namespaceSecretMountPath := getNamespaceSecretMountPath(secretMountPath, namespace)
 
-		function, err := GetFunction(client, name, namespace)
+		function, err := fs.GetDeployedFunction(name);
 		if err != nil {
 			msg := fmt.Sprintf("service %s not found", name)
 			log.Printf("[Update] %s\n", msg)
@@ -92,7 +92,11 @@ func MakeUpdateHandler(client *containerd.Client, cni gocni.CNI, secretMountPath
 		// The pull has already been done in prepull, so we can force this pull to "false"
 		pull := false
 
-		if err := deploy(ctx, req, client, cni, namespaceSecretMountPath, pull); err != nil {
+		/* TODO: Replace fn w/ a real function - update handling code is stubbed
+		 * out for now. We need to add support for changing already deployed
+		 * Functions via this handler */
+		fn := Function{}
+		if err := deploy(ctx, req, client, cni, namespaceSecretMountPath, pull, &fn); err != nil {
 			log.Printf("[Update] error deploying %s, error: %s\n", name, err)
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
