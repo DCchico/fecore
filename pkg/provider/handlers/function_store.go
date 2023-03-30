@@ -1,12 +1,18 @@
 package handlers
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"sync"
-	"encoding/json"
+	"time"
 
+	"github.com/containerd/containerd"
+	"github.com/containerd/containerd/namespaces"
+	gocni "github.com/containerd/go-cni"
 	"github.gatech.edu/faasedge/fecore/pkg/provider/storage"
+	fecore "github.gatech.edu/faasedge/fecore/pkg"
 )
 
 /*
@@ -33,22 +39,48 @@ func InitFunctionStore(storageManager storage.StorageManager) (*FunctionStore, e
 		return nil, err
 	}
 	
-	log.Println(sFns)
+	// log.Println(sFns)
 	for _, sFn := range sFns {
 		fn := getFunction(&sFn)
 		cns, err := storageManager.GetContainersForFunction(fn.name)
-		log.Println(cns)
+		// log.Println(cns)
 		if err != nil {
 			return nil, err
 		}
 		for _, c := range cns {
 			fn.idleReplicas[c.Name] = c.Ip
+			fn.idleReplicasTs[c.Name] = time.Now()
 		}
 		fs.deployedFunctions[fn.name] = &fn
 	}
-	log.Println(fs.deployedFunctions)
+	// log.Println(fs.deployedFunctions)
 
 	return &fs, nil
+}
+
+/**
+ * Cleanup function replicas that are not being used
+ */
+func (fs *FunctionStore) CleanupDaemon(client *containerd.Client, cni gocni.CNI) {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+
+	log.Println("[CleanupDaemon] RUNNING")
+
+	// TODO using default, is there a way to get all namespaces? do we need it?
+	ctx := namespaces.WithNamespace(context.Background(), fecore.DefaultFunctionNamespace)
+
+	currTs := time.Now()
+	for name, fn := range fs.deployedFunctions {
+		for cn, ts := range fn.idleReplicasTs {
+			if currTs.Sub(ts).Seconds() >= 100 { // TODO 100 seconds harcoded
+				log.Println("[CleanupDaemon] Cleaning up replica :", cn)
+				delete(fs.deployedFunctions[name].idleReplicas, cn)
+				delete(fs.deployedFunctions[name].idleReplicasTs, cn)
+				deleteReplica(ctx, client, cni, cn);
+			}
+		}
+	}
 }
 
 /* Gets a function's metadata from DB, creates/populates Function struct
@@ -140,7 +172,10 @@ func (fs *FunctionStore) GetIdleReplica(fn string) (string, string, error) {
 		break
 	}
 	delete(fs.deployedFunctions[fn].idleReplicas, name)
+	delete(fs.deployedFunctions[fn].idleReplicasTs, name)
+
 	fs.deployedFunctions[fn].activeReplicas[name] = ip
+
 	return name, ip, nil
 }
 
@@ -175,7 +210,8 @@ func (fs *FunctionStore) UpdateReplicaStatusInactive(fn string, ip string) error
 		return fmt.Errorf("[UpdateReplicaStatusInactive] Unable to get function %s container %s in active set", fn, cn)
 	}
 	delete(fs.deployedFunctions[fn].activeReplicas, cn)
-	fs.deployedFunctions[fn].idleReplicas[cn] = ip	
+	fs.deployedFunctions[fn].idleReplicas[cn] = ip
+	fs.deployedFunctions[fn].idleReplicasTs[cn] = time.Now()
 	return nil
 }
 
@@ -199,6 +235,7 @@ func getFunction(f *storage.Function) Function {
 		image: f.Image,
 		labels: labels,
 		idleReplicas: make(map[string]string),
+		idleReplicasTs: make(map[string]time.Time),
 		activeReplicas: make(map[string]string),
 		annotations: annotations,
 		secrets: secrets,

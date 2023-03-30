@@ -82,6 +82,7 @@ func MakeDeployHandler(client *containerd.Client, cni gocni.CNI, secretMountPath
 		fn.secretsPath = secretMountPath
 		fn.activeReplicas = make(map[string]string)
 		fn.idleReplicas = make(map[string]string)
+		fn.idleReplicasTs = make(map[string]time.Time)
 
 		deployErr := deploy(ctx, req, client, cni, namespaceSecretMountPath, alwaysPull, &fn)
 		if deployErr != nil {
@@ -156,6 +157,7 @@ func deploy(ctx context.Context, req types.FunctionDeployment, client *container
 	} else {
 		fn.memoryLimit = 0
 	}
+	fn.memoryLimit = 50000000 // TODO probably bug in crun latest version
 	replicaName, createReplicaStatus := createReplica(client, cni, fn, false)
 	if createReplicaStatus == nil {
 		log.Printf("[deploy] Created container '%s' for Function '%s'", replicaName, fn.name)
