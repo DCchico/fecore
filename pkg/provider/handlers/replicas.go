@@ -128,7 +128,7 @@ func createReplica(client *containerd.Client, cni gocni.CNI, fn *Function, setAc
 
 	createTaskStatus := createTask(ctx, container, cni)
 	if createTaskStatus != nil {
-		return "", fmt.Errorf("[createReplica] Unable to create task for container '%s': %w", name, err)
+		return "", fmt.Errorf("[createReplica] Unable to create task for container '%s': %w", name, createTaskStatus)
 	}
 	task, err := container.Task(ctx, nil)
 	if err == nil {
