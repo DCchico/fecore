@@ -19,7 +19,7 @@ sudo docker login // to login to docker
 sudo buildah build --annotation "module.wasm.image/variant=compat-smart" -t wasm-sock .
 sudo buildah push --authfile ~/.docker/config.json localhost/wasm-sock:latest docker://<docker-username>/wasm-sock:latest
 sudo ctr i pull docker.io/<docker-username>/wasm-sock:latest
-sudo ctr run -d  --net-host  --label module.wasm.image/variant=compat-smart docker.io/<docker-username>/wasm-sock:latest wasm-sock
+sudo ctr run -d --net-host --label module.wasm.image/variant=compat-smart docker.io/<docker-username>/wasm-sock:latest wasm-sock
 ```
 
 ```

@@ -117,6 +117,7 @@ func createReplica(client *containerd.Client, cni gocni.CNI, fn *Function, setAc
 			oci.WithHostname(name),
 			oci.WithCapabilities([]string{"CAP_NET_RAW"}),
 			oci.WithMounts(mounts),
+			oci.WithAnnotations(labels),
 			oci.WithEnv(envs),
 			withMemory(memory)),
 		containerd.WithContainerLabels(labels),
