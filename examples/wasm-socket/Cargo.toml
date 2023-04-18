@@ -7,4 +7,4 @@ edition = "2021"
 
 [dependencies]
 hyper_wasi = { version = "0.15", features = ["full"] }
-tokio_wasi = { version = "1.25", features = ["io-util", "fs", "net", "time", "rt", "macros"] }
+tokio_wasi = { version = "1.25", features = ["full"] }
