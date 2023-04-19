@@ -16,13 +16,15 @@ Similar to faasd, it relies on [containerd](https://containerd.io/) and [Contain
 
 ## Installation
 
-### WasmEdge
+### WasmEdge with WASI-NN
 
 https://wasmedge.org/book/en/contribute/build_from_src/plugin_wasi_nn.html
 
 ### Crun
 
+clone modified crun to support WasmEdge + WASINN: https://github.com/omkarprabhu-98/crun.git
 https://wasmedge.org/book/en/use_cases/kubernetes/container/crun.html
+
 
 ### Containerd
 
