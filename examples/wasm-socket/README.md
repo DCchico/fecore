@@ -6,6 +6,12 @@ cargo build --target wasm32-wasi
 
 ## Run
 
+### Wasmedge
+```
+cd target/wasm32-wasi/debug
+wasmedge --dir .:. wasm-sock.wasm
+```
+
 ### Buildah + Podman 
 ```
 buildah bud --annotation "module.wasm.image/variant=compat" -t wasm-sock .
@@ -30,8 +36,6 @@ curl http://127.0.0.1:8080
 
 Assuming its pushed to `docker.io/<docker-username>/wasm-sock:latest` and the services are up (`fecure up` & `fecore provider`)
 
-
-### THIS DOESN'T SEEM TO WORK 
 ```
 faas-cli deploy --image docker.io/<docker-username>/wasm-sock:latest --name wasm-sock --label module.wasm.image/variant=compat-smart
 ```
