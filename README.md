@@ -18,7 +18,9 @@ Similar to faasd, it relies on [containerd](https://containerd.io/) and [Contain
 
 ### WasmEdge with WASI-NN
 
+Configure with tensorflow lite as backend
 https://wasmedge.org/book/en/contribute/build_from_src/plugin_wasi_nn.html
+
 
 ### Crun
 

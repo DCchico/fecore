@@ -102,6 +102,25 @@ func createReplica(client *containerd.Client, cni gocni.CNI, fn *Function, setAc
 
 	labels := fn.labels
 
+	// if wasm container, we need to mount some paths and set env variables for wasmedge to load WASI-NN related plugins
+	if val, ok := labels["module.wasm.image/variant"]; ok && (val == "compat-smart" || val == "compat")  {
+		mounts = append(mounts, specs.Mount{
+			Destination: path.Join("/lib/"),
+			Type:        "bind",
+			Source:      path.Join("/usr/local/lib/"),
+			Options:     []string{"rbind", "ro"},
+		})
+		mounts = append(mounts, specs.Mount{
+			Destination: path.Join("/wasmedge/"),
+			Type:        "bind",
+			Source:      path.Join("/usr/local/lib/wasmedge/"),
+			Options:     []string{"rbind", "ro"},
+		})
+
+		envs = append(envs, "WASMEDGE_PLUGIN_PATH=/wasmedge/")
+		envs = append(envs, "LD_LIBRARY_PATH=\"/lib/:/wasmedge/\"")
+	}
+
 	var memory *specs.LinuxMemory
 	memory = &specs.LinuxMemory{}
 	memory.Limit = &fn.memoryLimit
