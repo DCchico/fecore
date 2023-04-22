@@ -1,0 +1,10 @@
+FROM scratch
+COPY ./target/wasm32-wasi/release/wasm-inference.wasm /
+# COPY ./mobilenet.xml /
+# COPY ./mobilenet.bin /
+# COPY ./car.png /
+COPY ./data/lite-model_aiy_vision_classifier_birds_V1_3.tflite /
+COPY ./data/bird.jpg /
+COPY ./data/birdx224x224x3.rgb /
+
+CMD ["/wasm-inference.wasm"]
