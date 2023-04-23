@@ -34,4 +34,5 @@ WORKDIR /opt
 
 RUN ls 
 
-ENTRYPOINT [ "./native-inf-rs" ]
+# ENTRYPOINT [ "./native-inf-rs" ]
+CMD exec ./native-inf-rs

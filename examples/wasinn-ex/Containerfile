@@ -1,9 +1,0 @@
-FROM scratch
-COPY ./target/wasm32-wasi/debug/wasinn-ex.wasm /
-# COPY ./mobilenet.xml /
-# COPY ./mobilenet.bin /
-# COPY ./car.png /
-COPY ./lite-model_aiy_vision_classifier_birds_V1_3.tflite /
-COPY ./bird.jpg /
-
-CMD ["/wasinn-ex.wasm"]

@@ -26,6 +26,13 @@ async fn process_req(req: Request<Body>) -> Result<Response<Body>, Infallible> {
     }
 }
 
+// async fn shutdown_signal() {
+//     // Wait for the CTRL+C signal
+//     tokio::signal::ctrl_c()
+//         .await
+//         .expect("failed to install CTRL+C signal handler");
+// }
+
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // For every connection, we must make a `Service` to handle all
@@ -41,8 +48,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     let server = Server::bind(&addr).serve(make_svc);
 
+    // let graceful = server.with_graceful_shutdown(shutdown_signal());
+
     println!("Listening on http://{}", addr);
 
+    // graceful.await;
     server.await?;
 
     Ok(())
