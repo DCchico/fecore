@@ -34,7 +34,7 @@ sudo ctr run -d --net-host --label module.wasm.image/variant=compat-smart docker
 ```
 
 ```
-curl http://127.0.0.1:8080
+curl http://127.0.0.1:8080 -H "tensor: birdx224x224x3.rgb"
 ```
 
 ## Running with Fecore
@@ -46,7 +46,7 @@ faas-cli deploy --image docker.io/<docker-username>/wasinn-ex:latest --name wasi
 ```
 
 ```
-curl http://10.62.0.1:8081/function/wasinn-ex
+curl http://10.62.0.1:8081/function/wasinn-ex -H "tensor: birdx224x224x3.rgb"
 ```
 
 ## Troubleshoot

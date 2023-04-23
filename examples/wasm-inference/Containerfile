@@ -1,5 +1,5 @@
 FROM scratch
-COPY ./target/wasm32-wasi/release/wasm-inference.wasm /
+COPY ./target/wasm32-wasi/debug/wasm-inference.wasm /
 # COPY ./mobilenet.xml /
 # COPY ./mobilenet.bin /
 # COPY ./car.png /

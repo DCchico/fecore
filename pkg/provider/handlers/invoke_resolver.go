@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/containerd/containerd"
 	gocni "github.com/containerd/go-cni"
@@ -56,13 +57,16 @@ func (i *InvokeResolver) Resolve(functionName string) (url.URL, error) {
 		log.Printf("[Invoke] Using idle replica '%s' for Function '%s'", replicaName, function.name)
 	} else {
 		log.Printf("[Invoke] Creating new replica for Function '%s'", function.name)
+		startTime := time.Now()
 		replicaName, err := createReplica(i.client, i.cni, &function, true)
 		if err != nil {
 			log.Printf("[Invoke] Error creating new replica for Function %s: %s", function.name, err)
 			return url.URL{}, err
 		} else {
+			coldStartTime := time.Since(startTime)
 			replicaIP = function.activeReplicas[replicaName]
 			i.fs.AddActiveReplica(function.name, replicaName, replicaIP)
+			i.fs.RecordColdStartTime(coldStartTime)
 			log.Printf("[Invoke] Using new replica '%s' @ %s for Function '%s'", replicaName, replicaIP, function.name)
 		}
 	}

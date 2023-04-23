@@ -25,6 +25,9 @@ type FunctionStore struct {
 	mu					sync.RWMutex // Added a rw mutex and things like reading the whole map require a global map anyways, TODO check if there are other strategies
 	deployedFunctions	map[string]*Function
 	storageManager		storage.StorageManager
+	
+	metricMu			sync.RWMutex
+	coldStartTime       []int64 // TODO move to function
 }
 
 func InitFunctionStore(storageManager storage.StorageManager) (*FunctionStore, error) {
@@ -32,6 +35,8 @@ func InitFunctionStore(storageManager storage.StorageManager) (*FunctionStore, e
 		mu: sync.RWMutex{},
 		deployedFunctions:  make(map[string]*Function),
 		storageManager: storageManager,
+		metricMu: sync.RWMutex{},
+		coldStartTime: make([]int64, 0),
 	}
 
 	sFns, err := storageManager.GetAllFunctions()
@@ -213,6 +218,20 @@ func (fs *FunctionStore) UpdateReplicaStatusInactive(fn string, ip string) error
 	fs.deployedFunctions[fn].idleReplicas[cn] = ip
 	fs.deployedFunctions[fn].idleReplicasTs[cn] = time.Now()
 	return nil
+}
+
+func (fs *FunctionStore) RecordColdStartTime(time time.Duration) {
+	fs.metricMu.Lock()
+	defer fs.metricMu.Unlock()
+
+	fs.coldStartTime = append(fs.coldStartTime, time.Milliseconds())
+}
+
+func (fs *FunctionStore) GetColdStartTimes() ([]int64){
+	fs.metricMu.RLock()
+	defer fs.metricMu.RUnlock()
+
+	return fs.coldStartTime
 }
 
 /* Utility functions */

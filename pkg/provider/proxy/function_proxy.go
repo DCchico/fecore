@@ -86,7 +86,7 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 
 	proxyStart := time.Now()
 	var response *http.Response
-	maxRetries := 20
+	maxRetries := 1000
 	connectionRetries := 0
 	sleepQuantum := 5
 

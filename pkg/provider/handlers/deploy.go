@@ -84,7 +84,7 @@ func MakeDeployHandler(client *containerd.Client, cni gocni.CNI, secretMountPath
 		fn.idleReplicas = make(map[string]string)
 		fn.idleReplicasTs = make(map[string]time.Time)
 
-		deployErr := deploy(ctx, req, client, cni, namespaceSecretMountPath, alwaysPull, &fn)
+		deployErr := deploy(ctx, req, client, cni, namespaceSecretMountPath, alwaysPull, &fn, fs)
 		if deployErr != nil {
 			log.Printf("[Deploy] error deploying %s, error: %s\n", name, deployErr)
 			http.Error(w, deployErr.Error(), http.StatusBadRequest)
@@ -126,7 +126,8 @@ func prepull(ctx context.Context, req types.FunctionDeployment, client *containe
 	return image, nil
 }
 
-func deploy(ctx context.Context, req types.FunctionDeployment, client *containerd.Client, cni gocni.CNI, secretMountPath string, alwaysPull bool, fn *Function) error {
+func deploy(ctx context.Context, req types.FunctionDeployment, client *containerd.Client, cni gocni.CNI, 
+	secretMountPath string, alwaysPull bool, fn *Function, fs *FunctionStore) error {
 
 	image, err := prepull(ctx, req, client, alwaysPull)
 	if err != nil {
@@ -158,8 +159,12 @@ func deploy(ctx context.Context, req types.FunctionDeployment, client *container
 		fn.memoryLimit = 0
 	}
 	fn.memoryLimit = 50000000 // TODO probably bug in crun latest version
+	
+	startTime := time.Now()
 	replicaName, createReplicaStatus := createReplica(client, cni, fn, false)
 	if createReplicaStatus == nil {
+		coldStartTime := time.Since(startTime)
+		fs.RecordColdStartTime(coldStartTime);
 		log.Printf("[deploy] Created container '%s' for Function '%s'", replicaName, fn.name)
 	} else {
 		log.Printf("[deploy] Failed to create container for Function '%s'", fn.name)
