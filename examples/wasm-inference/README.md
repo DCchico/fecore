@@ -20,7 +20,8 @@ wasmedge --dir .:. wasinn-ex.wasm
 ### Buildah + Podman 
 ```
 buildah bud --annotation "module.wasm.image/variant=compat" -t wasinn-ex .
-podman run --network=host --runtime=/usr/local/bin/crun wasinn-ex:latest
+
+podman run --network=host --runtime=/usr/local/bin/crun -e WASMEDGE_PLUGIN_PATH="/wasmedge/"  -e LD_LIBRARY_PATH="/lib/:/wasmedge/" wasinn-ex:latest
 ```
 
 ### Buildah + Ctr 
@@ -30,7 +31,7 @@ sudo docker login // to login to docker
 sudo buildah build --annotation "module.wasm.image/variant=compat-smart" -t wasinn-ex .
 sudo buildah push --authfile ~/.docker/config.json localhost/wasinn-ex:latest docker://<docker-username>/wasinn-ex:latest
 sudo ctr i pull docker.io/<docker-username>/wasinn-ex:latest
-sudo ctr run -d --net-host --label module.wasm.image/variant=compat-smart docker.io/<docker-username>/wasinn-ex:latest wasinn-ex
+sudo ctr run -d --net-host --label module.wasm.image/variant=compat-smart --env WASMEDGE_PLUGIN_PATH=/wasmedge/ --env LD_LIBRARY_PATH="/lib/:/wasmedge/"  docker.io/<docker-username>/wasinn-ex:latest wasinn-ex
 ```
 
 ```
