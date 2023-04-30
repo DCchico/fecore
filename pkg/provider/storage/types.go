@@ -3,22 +3,22 @@
 package storage
 
 type Function struct {
-	Name		string // unique
-	Namespace	string
-	Image		string
-	Labels		string // json
-	Annotations	string // json
-	Secrets		string // []string
-	SecretsPath	string
-	EnvVars		string // json
-	EnvProcess	string
-	MemoryLimit	int64
+	Name        string // unique
+	Namespace   string
+	Image       string
+	Labels      string // json
+	Annotations string // json
+	Secrets     string // []string
+	SecretsPath string
+	EnvVars     string // json
+	EnvProcess  string
+	MemoryLimit int64
 }
 
 type Container struct {
-	Name			string // unique
-	ParentFunction	string
-	Ip				string
+	Name           string // unique
+	ParentFunction string
+	Ip             string
 }
 
 type StorageManager interface {

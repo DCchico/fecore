@@ -1,3 +1,6 @@
+# github.com/KarpelesLab/reflink v0.0.2
+## explicit
+github.com/KarpelesLab/reflink
 # github.com/Microsoft/go-winio v0.5.1
 ## explicit; go 1.12
 github.com/Microsoft/go-winio
