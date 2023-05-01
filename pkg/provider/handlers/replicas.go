@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path"
+	"syscall"
 
 	"github.com/KarpelesLab/reflink"
 	"github.com/containerd/containerd"
@@ -75,11 +76,31 @@ func MakeReplicaReaderHandler(client *containerd.Client, fs *FunctionStore) func
 
 func createReplica(client *containerd.Client, cni gocni.CNI, fn *Function, setActive bool) (string, error) {
 
-	if val, ok := fn.labels["module.wasm.image/variant"]; ok && (val == "compat-smart" || val == "compat") {
-		return createWasmReplica(fn, setActive);
-	}
-
 	ctx := namespaces.WithNamespace(context.Background(), fn.namespace)
+
+	if val, ok := fn.labels["module.wasm.image/variant"]; ok && (val == "compat-smart" || val == "compat") {
+		wasmName, wasmPid, err := createWasmReplica(fn, setActive)
+		if err == nil {
+			/* Setup CNI for PID */
+			//cniResult, err := cninetwork.CreateWasmCNINetwork(ctx, cni, wasmName, wasmPid, fn.labels)
+			labels := map[string]string{}
+			result, err := cninetwork.CreateWasmCNINetwork(ctx, cni, wasmName, wasmPid, labels)
+			if err != nil {
+				log.Printf("[createReplica] Could not setup networking for WASM container '%s'", wasmName)
+				return "", err
+			}
+			log.Printf("IP for '%s' = %s", wasmName, result.Interfaces["eth1"].IPConfigs[0].IP)
+			// Store UUID,PID in fn
+			ip := result.Interfaces["eth1"].IPConfigs[0].IP.String()
+			if setActive {
+				fn.activeReplicas[wasmName] = ip
+			} else {
+				fn.idleReplicas[wasmName] = ip
+			}
+			fn.pid[wasmName] = uint32(wasmPid)
+		}
+		return wasmName, nil
+	}
 
 	snapshotter := ""
 	if val, ok := os.LookupEnv("snapshotter"); ok {
@@ -108,24 +129,24 @@ func createReplica(client *containerd.Client, cni gocni.CNI, fn *Function, setAc
 
 	labels := fn.labels
 
-	// if wasm container, we need to mount some paths and set env variables for wasmedge to load WASI-NN related plugins
-	if val, ok := labels["module.wasm.image/variant"]; ok && (val == "compat-smart" || val == "compat") {
-		mounts = append(mounts, specs.Mount{
-			Destination: path.Join("/lib/"),
-			Type:        "bind",
-			Source:      path.Join("/usr/local/lib/"),
-			Options:     []string{"rbind", "ro"},
-		})
-		mounts = append(mounts, specs.Mount{
-			Destination: path.Join("/wasmedge/"),
-			Type:        "bind",
-			Source:      path.Join("/usr/local/lib/wasmedge/"),
-			Options:     []string{"rbind", "ro"},
-		})
+	// // if wasm container, we need to mount some paths and set env variables for wasmedge to load WASI-NN related plugins
+	// if val, ok := labels["module.wasm.image/variant"]; ok && (val == "compat-smart" || val == "compat") {
+	// 	mounts = append(mounts, specs.Mount{
+	// 		Destination: path.Join("/lib/"),
+	// 		Type:        "bind",
+	// 		Source:      path.Join("/usr/local/lib/"),
+	// 		Options:     []string{"rbind", "ro"},
+	// 	})
+	// 	mounts = append(mounts, specs.Mount{
+	// 		Destination: path.Join("/wasmedge/"),
+	// 		Type:        "bind",
+	// 		Source:      path.Join("/usr/local/lib/wasmedge/"),
+	// 		Options:     []string{"rbind", "ro"},
+	// 	})
 
-		envs = append(envs, "WASMEDGE_PLUGIN_PATH=/wasmedge/")
-		envs = append(envs, "LD_LIBRARY_PATH=\"/lib/:/wasmedge/\"")
-	}
+	// 	envs = append(envs, "WASMEDGE_PLUGIN_PATH=/wasmedge/")
+	// 	envs = append(envs, "LD_LIBRARY_PATH=\"/lib/:/wasmedge/\"")
+	// }
 
 	var memory *specs.LinuxMemory
 	memory = &specs.LinuxMemory{}
@@ -203,7 +224,7 @@ func setupWasmStorage(fn *Function, name string) error {
 	return nil
 }
 
-func createWasmReplica(fn *Function, setActive bool) (string, error) {
+func createWasmReplica(fn *Function, setActive bool) (string, int, error) {
 	// WASM_IMAGES_ROOT := "/mnt/faasedge/images"
 	/* Generate UUID */
 	name := fn.name + "-" + uuid.New().String()
@@ -211,7 +232,7 @@ func createWasmReplica(fn *Function, setActive bool) (string, error) {
 	/* Create unique dir for replica and setup reflinks */
 	err := setupWasmStorage(fn, name)
 	if err != nil {
-		return "", err
+		return "", -1, err
 	}
 	/* Exec wasmedge to create container process, retrieve PID */
 	container_wasm_file := fn.image + "/" + "function.wasm"
@@ -221,27 +242,17 @@ func createWasmReplica(fn *Function, setActive bool) (string, error) {
 	cmd.Env = append(cmd.Environ(), "WASMEDGE_PLUGIN_PATH=/wasmedge/")
 	cmd.Env = append(cmd.Environ(), "LD_LIBRARY_PATH=\"/lib/:/wasmedge/\"")
 
+	cmd.SysProcAttr = &syscall.SysProcAttr{Unshareflags: syscall.CLONE_NEWNET}
+
 	err = cmd.Start()
 
 	if err == nil {
 		pid := cmd.Process.Pid
 		log.Printf("[createWasmReplica] WASM container '%s' started (PID = %d)", name, pid)
-		/* Setup CNI for PID */
-		// ip, err := cninetwork.GetIPAddress(name, uint32(pid))
-		// if err != nil {
-		// 	return "", fmt.Errorf("[createWasmReplica] Unable to get IP for container '%s': %w", name, err)
-		// }
-		ip := "0.0.0.0"
-		// Store UUID,PID in fn
-		if setActive {
-			fn.activeReplicas[name] = ip
-		} else {
-			fn.idleReplicas[name] = ip
-		}
-		fn.pid[name] = uint32(pid)	
-		return name, nil
+
+		return name, pid, nil
 	}
 
 	log.Printf("[createWasmReplica] Error starting WASM container '%s'", name)
-	return "", err
+	return "", -1, err
 }

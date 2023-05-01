@@ -59,7 +59,7 @@ func MakeDeleteHandler(client *containerd.Client, cni gocni.CNI, fs *FunctionSto
 		ctx := namespaces.WithNamespace(context.Background(), lookupNamespace)
 
 		// Remove each Function replica
-		fn, err := fs.GetDeployedFunction(name);
+		fn, err := fs.GetDeployedFunction(name)
 		for rname := range fn.idleReplicas {
 			deleteReplica(ctx, client, fn, cni, rname)
 		}
@@ -75,13 +75,12 @@ func MakeDeleteHandler(client *containerd.Client, cni gocni.CNI, fs *FunctionSto
 
 func deleteReplica(ctx context.Context, client *containerd.Client, fn Function, cni gocni.CNI, name string) error {
 
-	networkErr := cninetwork.DeleteCNINetwork(ctx, cni, client, name)
-	if networkErr != nil {
-		log.Printf("[deleteReplica] Error removing network for Function '%s': %s\n", name, networkErr)
-	}
-
 	// TODO refactor, two different paths for wasm and regular containers
 	if val, ok := fn.labels["module.wasm.image/variant"]; ok && (val == "compat-smart" || val == "compat") {
+		networkErr := cninetwork.DeleteWasmCNINetwork(ctx, cni, client, name, int(fn.pid[name]))
+		if networkErr != nil {
+			log.Printf("[deleteReplica] Error removing network for Function '%s': %s\n", name, networkErr)
+		}
 		pid := int(fn.pid[name])
 		proc, err := os.FindProcess(pid)
 		if err != nil {
@@ -99,6 +98,10 @@ func deleteReplica(ctx context.Context, client *containerd.Client, fn Function, 
 			log.Printf("[deleteReplica]  Deleted rootfs for container replica %s", name)
 		}
 	} else {
+		networkErr := cninetwork.DeleteCNINetwork(ctx, cni, client, name)
+		if networkErr != nil {
+			log.Printf("[deleteReplica] Error removing network for Function '%s': %s\n", name, networkErr)
+		}
 		containerErr := service.Remove(ctx, client, name)
 		if containerErr != nil {
 			log.Printf("[deleteReplica] Error removing replica container '%s': %s\n", name, containerErr)
