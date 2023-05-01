@@ -75,6 +75,10 @@ func MakeReplicaReaderHandler(client *containerd.Client, fs *FunctionStore) func
 
 func createReplica(client *containerd.Client, cni gocni.CNI, fn *Function, setActive bool) (string, error) {
 
+	if val, ok := fn.labels["module.wasm.image/variant"]; ok && (val == "compat-smart" || val == "compat") {
+		return createWasmReplica(fn, setActive);
+	}
+
 	ctx := namespaces.WithNamespace(context.Background(), fn.namespace)
 
 	snapshotter := ""
@@ -174,8 +178,8 @@ func createReplica(client *containerd.Client, cni gocni.CNI, fn *Function, setAc
 }
 
 func setupWasmStorage(fn *Function, name string) error {
-	WASM_IMAGES_ROOT := "/mnt/faasedge/images"
-	image_path := WASM_IMAGES_ROOT + "/" + fn.image
+	// WASM_IMAGES_ROOT := "/mnt/faasedge/images"
+	image_path := fn.image
 	rootfs_path := image_path + "/replicas/" + name
 	/* Check if unique dir for replica exists; if so, remove */
 	if _, err := os.Stat(rootfs_path); !os.IsNotExist(err) {
@@ -199,19 +203,19 @@ func setupWasmStorage(fn *Function, name string) error {
 	return nil
 }
 
-func createWasmReplica(fn *Function, setActive bool) error {
-	WASM_IMAGES_ROOT := "/mnt/faasedge/images"
+func createWasmReplica(fn *Function, setActive bool) (string, error) {
+	// WASM_IMAGES_ROOT := "/mnt/faasedge/images"
 	/* Generate UUID */
 	name := fn.name + "-" + uuid.New().String()
 
 	/* Create unique dir for replica and setup reflinks */
 	err := setupWasmStorage(fn, name)
 	if err != nil {
-		return err
+		return "", err
 	}
 	/* Exec wasmedge to create container process, retrieve PID */
-	container_wasm_file := WASM_IMAGES_ROOT + "/" + fn.image + "/" + "function.wasm"
-	container_dir_arg := ".:" + WASM_IMAGES_ROOT + "/replicas/" + name
+	container_wasm_file := fn.image + "/" + "function.wasm"
+	container_dir_arg := ".:" + fn.image + "/replicas/" + name
 	cmd := exec.Command("wasmedge", "--dir", container_dir_arg, container_wasm_file)
 
 	cmd.Env = append(cmd.Environ(), "WASMEDGE_PLUGIN_PATH=/wasmedge/")
@@ -219,24 +223,25 @@ func createWasmReplica(fn *Function, setActive bool) error {
 
 	err = cmd.Start()
 
-	if err != nil {
-		log.Printf("[createWasmReplica] Error starting WASM container '%s'", name)
-	} else {
+	if err == nil {
 		pid := cmd.Process.Pid
 		log.Printf("[createWasmReplica] WASM container '%s' started (PID = %d)", name, pid)
 		/* Setup CNI for PID */
-		ip, err := cninetwork.GetIPAddress(name, uint32(pid))
-		if err != nil {
-			return fmt.Errorf("[createWasmReplica] Unable to get IP for container '%s': %w", name, err)
-		}
+		// ip, err := cninetwork.GetIPAddress(name, uint32(pid))
+		// if err != nil {
+		// 	return "", fmt.Errorf("[createWasmReplica] Unable to get IP for container '%s': %w", name, err)
+		// }
+		ip := "0.0.0.0"
 		// Store UUID,PID in fn
 		if setActive {
 			fn.activeReplicas[name] = ip
 		} else {
 			fn.idleReplicas[name] = ip
 		}
-		fn.pid[name] = uint32(pid)
+		fn.pid[name] = uint32(pid)	
+		return name, nil
 	}
 
-	return nil
+	log.Printf("[createWasmReplica] Error starting WASM container '%s'", name)
+	return "", err
 }

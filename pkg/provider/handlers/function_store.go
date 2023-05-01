@@ -82,7 +82,7 @@ func (fs *FunctionStore) CleanupDaemon(client *containerd.Client, cni gocni.CNI)
 				log.Println("[CleanupDaemon] Cleaning up replica :", cn)
 				delete(fs.deployedFunctions[name].idleReplicas, cn)
 				delete(fs.deployedFunctions[name].idleReplicasTs, cn)
-				deleteReplica(ctx, client, cni, cn);
+				deleteReplica(ctx, client, *fs.deployedFunctions[name], cni, cn);
 			}
 		}
 	}
