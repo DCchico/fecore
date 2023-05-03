@@ -12,6 +12,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/containerd/containerd"
 	gocni "github.com/containerd/go-cni"
@@ -121,6 +122,19 @@ func CreateCNINetwork(ctx context.Context, cni gocni.CNI, task containerd.Task, 
 	return result, nil
 }
 
+func CreateWasmCNINetwork(ctx context.Context, cni gocni.CNI, name string, pid int, labels map[string]string) (*gocni.CNIResult, error) {
+	start := time.Now()
+	id := fmt.Sprintf("%s-%d", name, pid)
+	netns := fmt.Sprintf(NetNSPathFmt, pid)
+	result, err := cni.Setup(ctx, id, netns, gocni.WithLabels(labels))
+	if err != nil {
+		return nil, errors.Wrapf(err, "Failed to setup network for task %q: %v", id, err)
+	}
+	duration := time.Since(start)
+	log.Printf("[CreateWasmCNINetwork] WASM CNI setup for '%s' took %d ms", name, duration.Milliseconds())
+	return result, nil
+}
+
 // DeleteCNINetwork deletes a CNI network based on task ID and Pid
 func DeleteCNINetwork(ctx context.Context, cni gocni.CNI, client *containerd.Client, name string) error {
 	container, containerErr := client.LoadContainer(ctx, name)
@@ -145,6 +159,21 @@ func DeleteCNINetwork(ctx context.Context, cni gocni.CNI, client *containerd.Cli
 	}
 
 	return errors.Wrapf(containerErr, "Unable to find container: %s, error: %s", name, containerErr)
+}
+
+func DeleteWasmCNINetwork(ctx context.Context, cni gocni.CNI, client *containerd.Client, name string, pid int) error {
+
+	log.Printf("[DeleteWasmCNINetwork] removing CNI network for '%s'\n", name)
+
+	id := fmt.Sprintf("%s-%d", name, pid)
+	netns := fmt.Sprintf(NetNSPathFmt, pid)
+
+	if err := cni.Remove(ctx, id, netns); err != nil {
+		return errors.Wrapf(err, "Failed to remove network for task: %q, %v", id, err)
+	}
+	log.Printf("[DeleteWasmCNINetwork] removed: %s from namespace: %s, ID: %s\n", name, netns, id)
+
+	return nil
 }
 
 // GetIPAddress returns the IP address from container based on container name and PID

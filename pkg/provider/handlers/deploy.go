@@ -143,11 +143,11 @@ func deploy(ctx context.Context, req types.FunctionDeployment, client *container
 	// TODO use container image to extra wasm data
 	// Currenly hack is to specify the tar path as image url
 	if val, ok := labels["module.wasm.image/variant"]; ok && (val == "compat-smart" || val == "compat") {
-		r, err := os.Open(req.Image)
+		WASM_IMAGES_ROOT := "/mnt/faasedge/images"
+		r, err := os.Open(WASM_IMAGES_ROOT + "/" + req.Image + ".tgz")
 		if err != nil {
 			return err
 		}
-		WASM_IMAGES_ROOT := "/mnt/faasedge/images"
 		err = untar(WASM_IMAGES_ROOT, r)
 		if err != nil {
 			return err
