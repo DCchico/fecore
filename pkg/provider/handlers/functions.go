@@ -23,6 +23,7 @@ type Function struct {
 	replicas       int
 	activeReplicas map[string]string
 	idleReplicas   map[string]string
+	idleReplicasTs map[string]time.Time
 	IP             string // not used
 	labels         map[string]string
 	annotations    map[string]string

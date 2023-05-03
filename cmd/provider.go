@@ -10,6 +10,7 @@ import (
 	"os"
 	"path"
 
+	"github.com/jasonlvhit/gocron"
 	"github.com/containerd/containerd"
 	_ "github.com/mattn/go-sqlite3"
 	bootstrap "github.com/openfaas/faas-provider"
@@ -96,6 +97,11 @@ func makeProviderCmd() *cobra.Command {
 		}
 
 		fs, err := handlers.InitFunctionStore(storageManager)
+
+		go func() {
+			gocron.Every(200).Second().Do(fs.CleanupDaemon, client, cni) // TODO 200 sec hardcoded
+			<- gocron.Start()
+		} ()
 
 		invokeResolver := handlers.NewInvokeResolver(client, cni, fs)
 
