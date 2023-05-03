@@ -26,8 +26,11 @@ type FunctionStore struct {
 	deployedFunctions	map[string]*Function
 	storageManager		storage.StorageManager
 	
+	// TODO move to function
 	metricMu			sync.RWMutex
-	coldStartTime       []int64 // TODO move to function
+	coldStartTimes      []int64
+	invocationTimesCold []int64 // cold and warm distinguish how many retries
+	invocationTimesWarm []int64
 }
 
 func InitFunctionStore(storageManager storage.StorageManager) (*FunctionStore, error) {
@@ -36,7 +39,7 @@ func InitFunctionStore(storageManager storage.StorageManager) (*FunctionStore, e
 		deployedFunctions:  make(map[string]*Function),
 		storageManager: storageManager,
 		metricMu: sync.RWMutex{},
-		coldStartTime: make([]int64, 0),
+		coldStartTimes: make([]int64, 0),
 	}
 
 	sFns, err := storageManager.GetAllFunctions()
@@ -224,14 +227,36 @@ func (fs *FunctionStore) RecordColdStartTime(time time.Duration) {
 	fs.metricMu.Lock()
 	defer fs.metricMu.Unlock()
 
-	fs.coldStartTime = append(fs.coldStartTime, time.Milliseconds())
+	fs.coldStartTimes = append(fs.coldStartTimes, time.Milliseconds())
 }
 
 func (fs *FunctionStore) GetColdStartTimes() ([]int64){
 	fs.metricMu.RLock()
 	defer fs.metricMu.RUnlock()
 
-	return fs.coldStartTime
+	return fs.coldStartTimes
+}
+
+func (fs *FunctionStore) RecordInvocationTime(time time.Duration, coldStart bool) {
+	fs.metricMu.Lock()
+	defer fs.metricMu.Unlock()
+
+	if coldStart {
+		fs.invocationTimesCold = append(fs.invocationTimesCold, time.Milliseconds())
+	} else {
+		fs.invocationTimesWarm = append(fs.invocationTimesWarm, time.Milliseconds())
+	}
+}
+
+func (fs *FunctionStore) GetInvocationTime(cold bool) ([]int64){
+	fs.metricMu.RLock()
+	defer fs.metricMu.RUnlock()
+
+	if cold {
+		return fs.invocationTimesCold
+	} else {
+		return fs.invocationTimesWarm
+	}
 }
 
 /* Utility functions */

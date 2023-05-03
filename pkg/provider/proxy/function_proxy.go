@@ -25,7 +25,7 @@ const (
 	defaultContentType = "text/plain"
 )
 
-func NewHandlerFunc(config types.FaaSConfig, resolver proxy.BaseURLResolver, fs *handlers.FunctionStore) http.HandlerFunc {
+func NewHandlerFunc(config types.FaaSConfig, resolver *handlers.InvokeResolver, fs *handlers.FunctionStore) http.HandlerFunc {
 	if resolver == nil {
 		panic("NewHandlerFunc: empty proxy handler resolver, cannot be nil")
 	}
@@ -54,7 +54,7 @@ func NewHandlerFunc(config types.FaaSConfig, resolver proxy.BaseURLResolver, fs 
 }
 
 // proxyRequest handles the actual resolution of and then request to the function service.
-func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient *http.Client, resolver proxy.BaseURLResolver, fs *handlers.FunctionStore) {
+func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient *http.Client, resolver *handlers.InvokeResolver, fs *handlers.FunctionStore) {
 	ctx := originalReq.Context()
 
 	pathVars := mux.Vars(originalReq)
@@ -64,7 +64,7 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 		return
 	}
 
-	functionAddr, resolveErr := resolver.Resolve(functionName)
+	functionAddr, coldStart, resolveErr := resolver.Resolve(functionName)
 	if resolveErr != nil {
 		// TODO: Should record the 404/not found error in Prometheus.
 		log.Printf("resolver error: no endpoints for %s: %s\n", functionName, resolveErr.Error())
@@ -114,8 +114,10 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 		defer response.Body.Close()
 	}
 
-	log.Printf("[function_proxy] Invocation of '%s' took %d ms with %d retires \n", functionName, proxyElapsed.Milliseconds(),
+	log.Printf("[function_proxy] Invocation of '%s' (coldStart: %t) took %d ms with %d retires \n", functionName, coldStart, proxyElapsed.Milliseconds(),
 		connectionRetries)
+	fs.RecordInvocationTime(proxyElapsed, coldStart)
+
 	ip := strings.Split(functionAddr.Host, ":")[0]
 	err = fs.UpdateReplicaStatusInactive(functionName, ip)
 	if err != nil {
