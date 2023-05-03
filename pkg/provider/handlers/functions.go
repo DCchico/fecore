@@ -19,7 +19,8 @@ type Function struct {
 	name           string
 	namespace      string
 	image          string
-	pid            uint32 // not used
+	imageFiles     []string
+	pid            map[string]uint32
 	replicas       int
 	activeReplicas map[string]string
 	idleReplicas   map[string]string
@@ -34,7 +35,6 @@ type Function struct {
 	memoryLimit    int64
 	createdAt      time.Time // not used
 }
-
 
 // // ListFunctions returns a map of all functions with running tasks on namespace
 // func ListFunctions(client *containerd.Client, namespace string) (map[string]*Function, error) {

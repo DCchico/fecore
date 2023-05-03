@@ -96,7 +96,7 @@ func MakeUpdateHandler(client *containerd.Client, cni gocni.CNI, secretMountPath
 		 * out for now. We need to add support for changing already deployed
 		 * Functions via this handler */
 		fn := Function{}
-		if err := deploy(ctx, req, client, cni, namespaceSecretMountPath, pull, &fn); err != nil {
+		if err := deploy(ctx, req, client, cni, namespaceSecretMountPath, pull, &fn, fs); err != nil {
 			log.Printf("[Update] error deploying %s, error: %s\n", name, err)
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return

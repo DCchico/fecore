@@ -1,14 +1,18 @@
 package handlers
 
 import (
+	"archive/tar"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
 	"path"
+	"path/filepath"
 	"time"
 
 	"github.com/containerd/containerd"
@@ -79,12 +83,14 @@ func MakeDeployHandler(client *containerd.Client, cni gocni.CNI, secretMountPath
 		fn := Function{}
 		fn.name = name
 		fn.namespace = namespace
+		fn.pid = make(map[string]uint32)
+		fn.imageFiles = make([]string, 0)
 		fn.secretsPath = secretMountPath
 		fn.activeReplicas = make(map[string]string)
 		fn.idleReplicas = make(map[string]string)
 		fn.idleReplicasTs = make(map[string]time.Time)
 
-		deployErr := deploy(ctx, req, client, cni, namespaceSecretMountPath, alwaysPull, &fn)
+		deployErr := deploy(ctx, req, client, cni, namespaceSecretMountPath, alwaysPull, &fn, fs)
 		if deployErr != nil {
 			log.Printf("[Deploy] error deploying %s, error: %s\n", name, deployErr)
 			http.Error(w, deployErr.Error(), http.StatusBadRequest)
@@ -126,21 +132,41 @@ func prepull(ctx context.Context, req types.FunctionDeployment, client *containe
 	return image, nil
 }
 
-func deploy(ctx context.Context, req types.FunctionDeployment, client *containerd.Client, cni gocni.CNI, secretMountPath string, alwaysPull bool, fn *Function) error {
-
-	image, err := prepull(ctx, req, client, alwaysPull)
-	if err != nil {
-		return err
-	}
-	fn.image = image.Name()
-
-	fn.envProcess = req.EnvProcess
-	fn.envVars = req.EnvVars
+func deploy(ctx context.Context, req types.FunctionDeployment, client *containerd.Client, cni gocni.CNI,
+	secretMountPath string, alwaysPull bool, fn *Function, fs *FunctionStore) error {
 
 	labels, err := buildLabels(&req)
 	if err != nil {
 		return fmt.Errorf("[deploy] Unable to build labels for Function '%s': %w", fn.name, err)
 	}
+
+	// TODO use container image to extra wasm data
+	// Currenly hack is to specify the tar path as image url
+	if val, ok := labels["module.wasm.image/variant"]; ok && (val == "compat-smart" || val == "compat") {
+		WASM_IMAGES_ROOT := "/mnt/faasedge/images"
+		r, err := os.Open(WASM_IMAGES_ROOT + "/" + req.Image + ".tgz")
+		if err != nil {
+			return err
+		}
+		err = untar(WASM_IMAGES_ROOT, r)
+		if err != nil {
+			return err
+		}
+		fn.image = WASM_IMAGES_ROOT + "/" + fn.name
+		files, _ := os.ReadDir(fn.image + "/rootfs")
+		for _, file := range files {
+			fn.imageFiles = append(fn.imageFiles, file.Name())
+		}
+	} else {
+		image, err := prepull(ctx, req, client, alwaysPull)
+		if err != nil {
+			return err
+		}
+		fn.image = image.Name()
+	}
+
+	fn.envProcess = req.EnvProcess
+	fn.envVars = req.EnvVars
 	fn.labels = labels
 
 	var memory *specs.LinuxMemory
@@ -158,8 +184,12 @@ func deploy(ctx context.Context, req types.FunctionDeployment, client *container
 		fn.memoryLimit = 0
 	}
 	fn.memoryLimit = 50000000 // TODO probably bug in crun latest version
+
+	startTime := time.Now()
 	replicaName, createReplicaStatus := createReplica(client, cni, fn, false)
 	if createReplicaStatus == nil {
+		coldStartTime := time.Since(startTime)
+		fs.RecordColdStartTime(coldStartTime)
 		log.Printf("[deploy] Created container '%s' for Function '%s'", replicaName, fn.name)
 	} else {
 		log.Printf("[deploy] Failed to create container for Function '%s'", fn.name)
@@ -301,5 +331,59 @@ func withMemory(mem *specs.LinuxMemory) oci.SpecOpts {
 			s.Linux.Resources.Memory.Limit = mem.Limit
 		}
 		return nil
+	}
+}
+
+// Ref: https://medium.com/@skdomino/taring-untaring-files-in-go-6b07cf56bc07
+// Untar takes a destination path and a reader; a tar reader loops over the tarfile
+// creating the file structure at 'dst' along the way, and writing any files
+func untar(dst string, r io.Reader) error {
+	gzr, err := gzip.NewReader(r)
+	if err != nil {
+		return err
+	}
+	defer gzr.Close()
+	tr := tar.NewReader(gzr)
+	for {
+		header, err := tr.Next()
+		switch {
+		// if no more files are found return
+		case err == io.EOF:
+			return nil
+		// return any other error
+		case err != nil:
+			return err
+		// if the header is nil, just skip it (not sure how this happens)
+		case header == nil:
+			continue
+		}
+		// the target location where the dir/file should be created
+		target := filepath.Join(dst, header.Name)
+		// the following switch could also be done using fi.Mode(), not sure if there
+		// a benefit of using one vs. the other.
+		// fi := header.FileInfo()
+		// check the file type
+		switch header.Typeflag {
+		// if its a dir and it doesn't exist create it
+		case tar.TypeDir:
+			if _, err := os.Stat(target); err != nil {
+				if err := os.MkdirAll(target, 0755); err != nil {
+					return err
+				}
+			}
+		// if it's a file create it
+		case tar.TypeReg:
+			f, err := os.OpenFile(target, os.O_CREATE|os.O_RDWR, os.FileMode(header.Mode))
+			if err != nil {
+				return err
+			}
+			// copy over contents
+			if _, err := io.Copy(f, tr); err != nil {
+				return err
+			}
+			// manually close here after each file operation; defering would cause each file close
+			// to wait until all operations have completed.
+			f.Close()
+		}
 	}
 }

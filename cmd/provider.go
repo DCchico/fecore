@@ -127,6 +127,8 @@ func makeProviderCmd() *cobra.Command {
 			LogHandler:           logs.NewLogHandlerFunc(fecorelogs.New(), config.ReadTimeout),
 		}
 
+		bootstrap.Router().HandleFunc("/metrics", handlers.MakeMetricsHandler(fs))
+
 		log.Printf("Listening on TCP port: %d\n", *config.TCPPort)
 		bootstrap.Serve(&bootstrapHandlers, config)
 		return nil
@@ -138,7 +140,7 @@ func makeProviderCmd() *cobra.Command {
 /*
 * Mutiple namespace support was added after release 0.13.0
 * Function will help users to migrate on multiple namespace support of fecore
- */
+*/
 func moveSecretsToDefaultNamespaceSecrets(baseSecretPath string, defaultNamespace string) error {
 	newSecretPath := path.Join(baseSecretPath, defaultNamespace)
 

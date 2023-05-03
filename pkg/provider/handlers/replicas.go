@@ -7,8 +7,11 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"path"
+	"syscall"
 
+	"github.com/KarpelesLab/reflink"
 	"github.com/containerd/containerd"
 	"github.com/containerd/containerd/namespaces"
 	"github.com/containerd/containerd/oci"
@@ -75,6 +78,30 @@ func createReplica(client *containerd.Client, cni gocni.CNI, fn *Function, setAc
 
 	ctx := namespaces.WithNamespace(context.Background(), fn.namespace)
 
+	if val, ok := fn.labels["module.wasm.image/variant"]; ok && (val == "compat-smart" || val == "compat") {
+		wasmName, wasmPid, err := createWasmReplica(fn, setActive)
+		if err == nil {
+			/* Setup CNI for PID */
+			//cniResult, err := cninetwork.CreateWasmCNINetwork(ctx, cni, wasmName, wasmPid, fn.labels)
+			labels := map[string]string{}
+			result, err := cninetwork.CreateWasmCNINetwork(ctx, cni, wasmName, wasmPid, labels)
+			if err != nil {
+				log.Printf("[createReplica] Could not setup networking for WASM container '%s'", wasmName)
+				return "", err
+			}
+			log.Printf("IP for '%s' = %s", wasmName, result.Interfaces["eth1"].IPConfigs[0].IP)
+			// Store UUID,PID in fn
+			ip := result.Interfaces["eth1"].IPConfigs[0].IP.String()
+			if setActive {
+				fn.activeReplicas[wasmName] = ip
+			} else {
+				fn.idleReplicas[wasmName] = ip
+			}
+			fn.pid[wasmName] = uint32(wasmPid)
+		}
+		return wasmName, nil
+	}
+
 	snapshotter := ""
 	if val, ok := os.LookupEnv("snapshotter"); ok {
 		snapshotter = val
@@ -102,6 +129,25 @@ func createReplica(client *containerd.Client, cni gocni.CNI, fn *Function, setAc
 
 	labels := fn.labels
 
+	// // if wasm container, we need to mount some paths and set env variables for wasmedge to load WASI-NN related plugins
+	// if val, ok := labels["module.wasm.image/variant"]; ok && (val == "compat-smart" || val == "compat") {
+	// 	mounts = append(mounts, specs.Mount{
+	// 		Destination: path.Join("/lib/"),
+	// 		Type:        "bind",
+	// 		Source:      path.Join("/usr/local/lib/"),
+	// 		Options:     []string{"rbind", "ro"},
+	// 	})
+	// 	mounts = append(mounts, specs.Mount{
+	// 		Destination: path.Join("/wasmedge/"),
+	// 		Type:        "bind",
+	// 		Source:      path.Join("/usr/local/lib/wasmedge/"),
+	// 		Options:     []string{"rbind", "ro"},
+	// 	})
+
+	// 	envs = append(envs, "WASMEDGE_PLUGIN_PATH=/wasmedge/")
+	// 	envs = append(envs, "LD_LIBRARY_PATH=\"/lib/:/wasmedge/\"")
+	// }
+
 	var memory *specs.LinuxMemory
 	memory = &specs.LinuxMemory{}
 	memory.Limit = &fn.memoryLimit
@@ -117,6 +163,7 @@ func createReplica(client *containerd.Client, cni gocni.CNI, fn *Function, setAc
 			oci.WithHostname(name),
 			oci.WithCapabilities([]string{"CAP_NET_RAW"}),
 			oci.WithMounts(mounts),
+			oci.WithAnnotations(labels),
 			oci.WithEnv(envs),
 			withMemory(memory)),
 		containerd.WithContainerLabels(labels),
@@ -128,7 +175,7 @@ func createReplica(client *containerd.Client, cni gocni.CNI, fn *Function, setAc
 
 	createTaskStatus := createTask(ctx, container, cni)
 	if createTaskStatus != nil {
-		return "", fmt.Errorf("[createReplica] Unable to create task for container '%s': %w", name, err)
+		return "", fmt.Errorf("[createReplica] Unable to create task for container '%s': %w", name, createTaskStatus)
 	}
 	task, err := container.Task(ctx, nil)
 	if err == nil {
@@ -149,4 +196,63 @@ func createReplica(client *containerd.Client, cni gocni.CNI, fn *Function, setAc
 		return name, nil
 	}
 	return "", err
+}
+
+func setupWasmStorage(fn *Function, name string) error {
+	// WASM_IMAGES_ROOT := "/mnt/faasedge/images"
+	image_path := fn.image
+	rootfs_path := image_path + "/replicas/" + name
+	/* Check if unique dir for replica exists; if so, remove */
+	if _, err := os.Stat(rootfs_path); !os.IsNotExist(err) {
+		os.RemoveAll(rootfs_path)
+	}
+	/* Create rootfs dir for Function instance */
+	err := os.Mkdir(rootfs_path, 0744)
+	if err != nil {
+		log.Printf("[setupWasmStorage] Unable to create rootfs for WASM container '%s'", name)
+		return err
+	}
+
+	/* Reflink all files in image rootfs */
+	for _, file := range fn.imageFiles {
+		err := reflink.Auto(image_path+"/rootfs/"+file, rootfs_path+"/"+file)
+		if err != nil {
+			log.Printf("[setupWasmStorage] Error creating reflink to file '%s' for container '%s'", file, name)
+			return err
+		}
+	}
+	return nil
+}
+
+func createWasmReplica(fn *Function, setActive bool) (string, int, error) {
+	// WASM_IMAGES_ROOT := "/mnt/faasedge/images"
+	/* Generate UUID */
+	name := fn.name + "-" + uuid.New().String()
+
+	/* Create unique dir for replica and setup reflinks */
+	err := setupWasmStorage(fn, name)
+	if err != nil {
+		return "", -1, err
+	}
+	/* Exec wasmedge to create container process, retrieve PID */
+	container_wasm_file := fn.image + "/" + "function.wasm"
+	container_dir_arg := ".:" + fn.image + "/replicas/" + name
+	cmd := exec.Command("wasmedge", "--dir", container_dir_arg, container_wasm_file)
+
+	cmd.Env = append(cmd.Environ(), "WASMEDGE_PLUGIN_PATH=/wasmedge/")
+	cmd.Env = append(cmd.Environ(), "LD_LIBRARY_PATH=\"/lib/:/wasmedge/\"")
+
+	cmd.SysProcAttr = &syscall.SysProcAttr{Unshareflags: syscall.CLONE_NEWNET}
+
+	err = cmd.Start()
+
+	if err == nil {
+		pid := cmd.Process.Pid
+		log.Printf("[createWasmReplica] WASM container '%s' started (PID = %d)", name, pid)
+
+		return name, pid, nil
+	}
+
+	log.Printf("[createWasmReplica] Error starting WASM container '%s'", name)
+	return "", -1, err
 }

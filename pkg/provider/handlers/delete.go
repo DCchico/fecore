@@ -6,6 +6,7 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
+	"os"
 
 	"github.com/containerd/containerd"
 	"github.com/containerd/containerd/namespaces"
@@ -58,12 +59,12 @@ func MakeDeleteHandler(client *containerd.Client, cni gocni.CNI, fs *FunctionSto
 		ctx := namespaces.WithNamespace(context.Background(), lookupNamespace)
 
 		// Remove each Function replica
-		fn, err := fs.GetDeployedFunction(name);
+		fn, err := fs.GetDeployedFunction(name)
 		for rname := range fn.idleReplicas {
-			deleteReplica(ctx, client, cni, rname)
+			deleteReplica(ctx, client, fn, cni, rname)
 		}
 		for rname := range fn.activeReplicas {
-			deleteReplica(ctx, client, cni, rname)
+			deleteReplica(ctx, client, fn, cni, rname)
 		}
 
 		fs.RemoveDeployedFunction(name)
@@ -72,17 +73,40 @@ func MakeDeleteHandler(client *containerd.Client, cni gocni.CNI, fs *FunctionSto
 	}
 }
 
-func deleteReplica(ctx context.Context, client *containerd.Client, cni gocni.CNI, name string) error {
+func deleteReplica(ctx context.Context, client *containerd.Client, fn Function, cni gocni.CNI, name string) error {
 
-	networkErr := cninetwork.DeleteCNINetwork(ctx, cni, client, name)
-	if networkErr != nil {
-		log.Printf("[deleteReplica] Error removing network for Function '%s': %s\n", name, networkErr)
-	}
-
-	containerErr := service.Remove(ctx, client, name)
-	if containerErr != nil {
-		log.Printf("[deleteReplica] Error removing replica container '%s': %s\n", name, containerErr)
-		return containerErr
+	// TODO refactor, two different paths for wasm and regular containers
+	if val, ok := fn.labels["module.wasm.image/variant"]; ok && (val == "compat-smart" || val == "compat") {
+		networkErr := cninetwork.DeleteWasmCNINetwork(ctx, cni, client, name, int(fn.pid[name]))
+		if networkErr != nil {
+			log.Printf("[deleteReplica] Error removing network for Function '%s': %s\n", name, networkErr)
+		}
+		pid := int(fn.pid[name])
+		proc, err := os.FindProcess(pid)
+		if err != nil {
+			log.Printf("[deleteReplica] Could not find WASM container process (PID=%d)", pid)
+			return err
+		} else {
+			proc.Kill()
+			log.Printf("[deleteReplica] Killed WASM container process (PID=%d)", pid)
+		}
+		err = os.RemoveAll(fn.image + "/replicas/" + name)
+		if err != nil {
+			log.Printf("[deleteReplica] Could not delete rootfs for container replica %s", name)
+			return err
+		} else {
+			log.Printf("[deleteReplica]  Deleted rootfs for container replica %s", name)
+		}
+	} else {
+		networkErr := cninetwork.DeleteCNINetwork(ctx, cni, client, name)
+		if networkErr != nil {
+			log.Printf("[deleteReplica] Error removing network for Function '%s': %s\n", name, networkErr)
+		}
+		containerErr := service.Remove(ctx, client, name)
+		if containerErr != nil {
+			log.Printf("[deleteReplica] Error removing replica container '%s': %s\n", name, containerErr)
+			return containerErr
+		}
 	}
 	log.Printf("[deleteReplica] Removed replica container: '%s'\n", name)
 	return nil
