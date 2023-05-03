@@ -84,12 +84,12 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 		defer proxyReq.Body.Close()
 	}
 
-	proxyStart := time.Now()
 	var response *http.Response
 	maxRetries := 1000
 	connectionRetries := 0
 	sleepQuantum := 5
 
+	proxyStart := time.Now()
 	/* First, try and establish connection to port 8080 */
 	for connectionRetries < maxRetries {
 		response, err = proxyClient.Do(proxyReq.WithContext(ctx))
@@ -98,46 +98,28 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 			sleepQuantum += 5
 			connectionRetries += 1
 		} else {
-			log.Printf("[retryProxyRequest] Took %d tries to contact Function on port 8080", connectionRetries)
 			break
 		}
 	}
-	log.Printf("[retryProxyRequest] First return code received from proxyClient is %d", response.StatusCode)
-	/* Once connected, keep trying to send the request until we no longer get
-	 * HTTP 500 (Internal Server Error) as response */
-	if response.StatusCode == 500 {
-		sleepQuantum = 5
-		for connectionRetries = 0; connectionRetries < maxRetries; connectionRetries += 1 {
-			response, err = proxyClient.Do(proxyReq.WithContext(ctx))
-			if response.StatusCode != 500 {
-				break
-			}
-			time.Sleep(time.Duration(sleepQuantum) * time.Millisecond)
-			sleepQuantum += 5
-		}
-		log.Printf("[retryProxyRequest] Tried %d tries to get non-HTTP 500 reply from Function", connectionRetries)
-	}
-	log.Printf("[retryProxyRequest] Last return code received from proxyClient is %d", response.StatusCode)
-
 	proxyElapsed := time.Since(proxyStart)
 
-	if err != nil {
-		log.Printf("[function_proxy] error with proxy request to '%s': %s\n", proxyReq.URL.String(), err.Error())
-
+	if err != nil || response.StatusCode != 200 {
+		log.Printf("[retryProxyRequest] Unable to contact function %s with status code %d and error : %s \n", functionName, response.StatusCode, err)
 		httputil.Errorf(w, http.StatusInternalServerError, "Can't reach service for '%s'", functionName)
 		return
 	}
+	// log.Printf("[retryProxyRequest] First return code received from proxyClient is %d", response.StatusCode)
 
 	if response.Body != nil {
 		defer response.Body.Close()
 	}
 
-	log.Printf("[function_proxy] Invocation of '%s' took %d ms\n", functionName, proxyElapsed.Milliseconds())
+	log.Printf("[function_proxy] Invocation of '%s' took %d ms with %d retires \n", functionName, proxyElapsed.Milliseconds(),
+		connectionRetries)
 	ip := strings.Split(functionAddr.Host, ":")[0]
 	err = fs.UpdateReplicaStatusInactive(functionName, ip)
 	if err != nil {
 		log.Printf("[function_proxy] Unable to update function replica status '%s': %s\n", proxyReq.URL.String(), err.Error())
-
 		httputil.Errorf(w, http.StatusInternalServerError, "Can't reach service for '%s'", functionName)
 		return
 	}
