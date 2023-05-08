@@ -10,8 +10,8 @@ import (
 	"os"
 	"path"
 
-	"github.com/jasonlvhit/gocron"
 	"github.com/containerd/containerd"
+	"github.com/jasonlvhit/gocron"
 	_ "github.com/mattn/go-sqlite3"
 	bootstrap "github.com/openfaas/faas-provider"
 	"github.com/openfaas/faas-provider/logs"
@@ -100,8 +100,8 @@ func makeProviderCmd() *cobra.Command {
 
 		go func() {
 			gocron.Every(200).Second().Do(fs.CleanupDaemon, client, cni) // TODO 200 sec hardcoded
-			<- gocron.Start()
-		} ()
+			<-gocron.Start()
+		}()
 
 		invokeResolver := handlers.NewInvokeResolver(client, cni, fs)
 
@@ -128,6 +128,7 @@ func makeProviderCmd() *cobra.Command {
 		}
 
 		bootstrap.Router().HandleFunc("/metrics", handlers.MakeMetricsHandler(fs))
+		bootstrap.Router().HandleFunc("/ipam", handlers.MakeIPAMHandler(fs))
 
 		log.Printf("Listening on TCP port: %d\n", *config.TCPPort)
 		bootstrap.Serve(&bootstrapHandlers, config)
@@ -140,7 +141,7 @@ func makeProviderCmd() *cobra.Command {
 /*
 * Mutiple namespace support was added after release 0.13.0
 * Function will help users to migrate on multiple namespace support of fecore
-*/
+ */
 func moveSecretsToDefaultNamespaceSecrets(baseSecretPath string, defaultNamespace string) error {
 	newSecretPath := path.Join(baseSecretPath, defaultNamespace)
 

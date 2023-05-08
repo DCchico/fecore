@@ -221,41 +221,42 @@ func buildLabels(request *types.FunctionDeployment) (map[string]string, error) {
 	return labels, nil
 }
 
-func createTask(ctx context.Context, container containerd.Container, cni gocni.CNI) error {
+func createTask(ctx context.Context, container containerd.Container, cni gocni.CNI) (string, error) {
 
 	name := container.ID()
 
 	task, taskErr := container.NewTask(ctx, cio.BinaryIO("/usr/local/bin/fecore", nil))
 
 	if taskErr != nil {
-		return fmt.Errorf("unable to start task: %s, error: %w", name, taskErr)
+		return "", fmt.Errorf("unable to start task: %s, error: %w", name, taskErr)
 	}
 
 	log.Printf("Container ID: %s\tTask ID %s:\tTask PID: %d\t\n", name, task.ID(), task.Pid())
 
 	labels := map[string]string{}
-	_, err := cninetwork.CreateCNINetwork(ctx, cni, task, labels)
+	result, err := cninetwork.CreateCNINetwork(ctx, cni, task, labels)
 
 	if err != nil {
-		return err
+		return "", err
 	}
 
-	ip, err := cninetwork.GetIPAddress(name, task.Pid())
-	if err != nil {
-		return err
-	}
+	// ip, err := cninetwork.GetIPAddress(name, task.Pid())
+	// if err != nil {
+	// 	return err
+	// }
+	ip := result.Interfaces["eth1"].IPConfigs[0].IP.String()
 
 	log.Printf("%s has IP: %s.\n", name, ip)
 
 	_, waitErr := task.Wait(ctx)
 	if waitErr != nil {
-		return errors.Wrapf(waitErr, "Unable to wait for task to start: %s", name)
+		return "", errors.Wrapf(waitErr, "Unable to wait for task to start: %s", name)
 	}
 
 	if startErr := task.Start(ctx); startErr != nil {
-		return errors.Wrapf(startErr, "Unable to start task: %s", name)
+		return "", errors.Wrapf(startErr, "Unable to start task: %s", name)
 	}
-	return nil
+	return ip, nil
 }
 
 func prepareEnv(envProcess string, reqEnvVars map[string]string) []string {

@@ -5,14 +5,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"sync"
 	"time"
 
 	"github.com/containerd/containerd"
 	"github.com/containerd/containerd/namespaces"
 	gocni "github.com/containerd/go-cni"
-	"github.gatech.edu/faasedge/fecore/pkg/provider/storage"
 	fecore "github.gatech.edu/faasedge/fecore/pkg"
+	"github.gatech.edu/faasedge/fecore/pkg/provider/storage"
 )
 
 /*
@@ -22,28 +23,36 @@ import (
 
 /* In-memory map for keeping track of functions that have been created */
 type FunctionStore struct {
-	mu					sync.RWMutex // Added a rw mutex and things like reading the whole map require a global map anyways, TODO check if there are other strategies
-	deployedFunctions	map[string]*Function
-	storageManager		storage.StorageManager
-	
-	metricMu			sync.RWMutex
-	coldStartTime       []int64 // TODO move to function
+	mu                sync.RWMutex // Added a rw mutex and things like reading the whole map require a global map anyways, TODO check if there are other strategies
+	deployedFunctions map[string]*Function
+	storageManager    storage.StorageManager
+
+	metricMu      sync.RWMutex
+	coldStartTime []int64 // TODO move to function
+
+	ipamMu sync.RWMutex
+	nextIP net.IP
+	//ipconfigs map[string]string
+	ipconfigs sync.Map
 }
 
 func InitFunctionStore(storageManager storage.StorageManager) (*FunctionStore, error) {
-	fs := FunctionStore {
-		mu: sync.RWMutex{},
-		deployedFunctions:  make(map[string]*Function),
-		storageManager: storageManager,
-		metricMu: sync.RWMutex{},
-		coldStartTime: make([]int64, 0),
+	fs := FunctionStore{
+		mu:                sync.RWMutex{},
+		deployedFunctions: make(map[string]*Function),
+		storageManager:    storageManager,
+		metricMu:          sync.RWMutex{},
+		coldStartTime:     make([]int64, 0),
+		ipamMu:            sync.RWMutex{},
+		//ipconfigs:         make(map[string]string),
+		ipconfigs: sync.Map{},
 	}
 
 	sFns, err := storageManager.GetAllFunctions()
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// log.Println(sFns)
 	for _, sFn := range sFns {
 		fn := getFunction(&sFn)
@@ -59,6 +68,8 @@ func InitFunctionStore(storageManager storage.StorageManager) (*FunctionStore, e
 		fs.deployedFunctions[fn.name] = &fn
 	}
 	// log.Println(fs.deployedFunctions)
+
+	fs.nextIP = net.IPv4(10, 62, 0, 1)
 
 	return &fs, nil
 }
@@ -82,14 +93,14 @@ func (fs *FunctionStore) CleanupDaemon(client *containerd.Client, cni gocni.CNI)
 				log.Println("[CleanupDaemon] Cleaning up replica :", cn)
 				delete(fs.deployedFunctions[name].idleReplicas, cn)
 				delete(fs.deployedFunctions[name].idleReplicasTs, cn)
-				deleteReplica(ctx, client, *fs.deployedFunctions[name], cni, cn);
+				deleteReplica(ctx, client, *fs.deployedFunctions[name], cni, cn)
 			}
 		}
 	}
 }
 
 /* Gets a function's metadata from DB, creates/populates Function struct
- * and returns pointer to that struct. 
+ * and returns pointer to that struct.
  */
 func (fs *FunctionStore) GetDeployedFunctions() ([]Function, error) {
 	fs.mu.RLock()
@@ -102,8 +113,8 @@ func (fs *FunctionStore) GetDeployedFunctions() ([]Function, error) {
 }
 
 /* Gets a function's metadata from DB, creates/populates Function struct
- * and returns pointer to that struct 
- * TODO check namespace 
+ * and returns pointer to that struct
+ * TODO check namespace
  */
 func (fs *FunctionStore) GetDeployedFunction(name string) (fn Function, err error) {
 	fs.mu.RLock()
@@ -198,7 +209,7 @@ func (fs *FunctionStore) AddActiveReplica(fn string, cn string, ip string) error
 }
 
 /* Change container from active to inactive
- * Note: lookup by ip and container name is not avaiable in resolver 
+ * Note: lookup by ip and container name is not avaiable in resolver
  */
 func (fs *FunctionStore) UpdateReplicaStatusInactive(fn string, ip string) error {
 	fs.mu.Lock()
@@ -227,7 +238,7 @@ func (fs *FunctionStore) RecordColdStartTime(time time.Duration) {
 	fs.coldStartTime = append(fs.coldStartTime, time.Milliseconds())
 }
 
-func (fs *FunctionStore) GetColdStartTimes() ([]int64){
+func (fs *FunctionStore) GetColdStartTimes() []int64 {
 	fs.metricMu.RLock()
 	defer fs.metricMu.RUnlock()
 
@@ -249,19 +260,19 @@ func getFunction(f *storage.Function) Function {
 	json.Unmarshal([]byte(f.Secrets), &annotations)
 
 	return Function{
-		name: f.Name,
-		namespace: f.Namespace,
-		image: f.Image,
-		labels: labels,
-		idleReplicas: make(map[string]string),
+		name:           f.Name,
+		namespace:      f.Namespace,
+		image:          f.Image,
+		labels:         labels,
+		idleReplicas:   make(map[string]string),
 		idleReplicasTs: make(map[string]time.Time),
 		activeReplicas: make(map[string]string),
-		annotations: annotations,
-		secrets: secrets,
-		secretsPath: f.SecretsPath,
-		envVars: envVars,
-		envProcess: f.EnvProcess,
-		memoryLimit: f.MemoryLimit,
+		annotations:    annotations,
+		secrets:        secrets,
+		secretsPath:    f.SecretsPath,
+		envVars:        envVars,
+		envProcess:     f.EnvProcess,
+		memoryLimit:    f.MemoryLimit,
 	}
 }
 
@@ -272,15 +283,15 @@ func getStorageFunction(f *Function) storage.Function {
 	secrets, _ := json.Marshal(f.secrets)
 
 	return storage.Function{
-		Name: f.name,
-		Namespace: f.namespace,
-		Image: f.image,
-		Labels: string(lables),
+		Name:        f.name,
+		Namespace:   f.namespace,
+		Image:       f.image,
+		Labels:      string(lables),
 		Annotations: string(annotations),
-		Secrets: string(secrets),
+		Secrets:     string(secrets),
 		SecretsPath: f.secretsPath,
-		EnvVars: string(envVars),
-		EnvProcess: f.envProcess,
+		EnvVars:     string(envVars),
+		EnvProcess:  f.envProcess,
 		MemoryLimit: f.memoryLimit,
 	}
 }

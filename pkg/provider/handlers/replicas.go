@@ -173,7 +173,7 @@ func createReplica(client *containerd.Client, cni gocni.CNI, fn *Function, setAc
 		return "", fmt.Errorf("[createReplica] Unable to create container '%s': %w", name, err)
 	}
 
-	createTaskStatus := createTask(ctx, container, cni)
+	ip, createTaskStatus := createTask(ctx, container, cni)
 	if createTaskStatus != nil {
 		return "", fmt.Errorf("[createReplica] Unable to create task for container '%s': %w", name, createTaskStatus)
 	}
@@ -184,10 +184,10 @@ func createReplica(client *containerd.Client, cni gocni.CNI, fn *Function, setAc
 		if err != nil {
 			return "", fmt.Errorf("[createReplica] Unable to get task status for container '%s': %w", name, err)
 		}
-		ip, err := cninetwork.GetIPAddress(name, task.Pid())
-		if err != nil {
-			return "", fmt.Errorf("[createReplica] Unable to get IP for container '%s': %w", name, err)
-		}
+		// ip, err := cninetwork.GetIPAddress(name, task.Pid())
+		// if err != nil {
+		// 	return "", fmt.Errorf("[createReplica] Unable to get IP for container '%s': %w", name, err)
+		// }
 		if setActive {
 			fn.activeReplicas[name] = ip
 		} else {

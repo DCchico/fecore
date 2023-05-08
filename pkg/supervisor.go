@@ -20,9 +20,9 @@ import (
 	"github.com/containerd/containerd/oci"
 	gocni "github.com/containerd/go-cni"
 	"github.com/docker/distribution/reference"
+	"github.com/pkg/errors"
 	"github.gatech.edu/faasedge/fecore/pkg/cninetwork"
 	"github.gatech.edu/faasedge/fecore/pkg/service"
-	"github.com/pkg/errors"
 
 	"github.com/containerd/containerd/namespaces"
 	units "github.com/docker/go-units"
@@ -228,17 +228,18 @@ func (s *Supervisor) Start(svcs []Service) error {
 		}
 
 		labels := map[string]string{}
-		_, err = cninetwork.CreateCNINetwork(ctx, s.cni, task, labels)
+		result, err := cninetwork.CreateCNINetwork(ctx, s.cni, task, labels)
 		if err != nil {
 			log.Printf("Error creating CNI for %s: %s", svc.Name, err)
 			return err
 		}
 
-		ip, err := cninetwork.GetIPAddress(svc.Name, task.Pid())
-		if err != nil {
-			log.Printf("Error getting IP for %s: %s", svc.Name, err)
-			return err
-		}
+		// ip, err := cninetwork.GetIPAddress(svc.Name, task.Pid())
+		// if err != nil {
+		// 	log.Printf("Error getting IP for %s: %s", svc.Name, err)
+		// 	return err
+		// }
+		ip := result.Interfaces["eth1"].IPConfigs[0].IP.String()
 
 		log.Printf("%s has IP: %s\n", newContainer.ID(), ip)
 
