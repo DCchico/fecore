@@ -9,12 +9,12 @@ import (
 )
 
 type MetricsExport struct {
-    ColdStart       []int64
-    InvocationCold  []int64
-	InvocationWarm  []int64
+	ColdStart      []int64
+	InvocationCold []int64
+	InvocationWarm []int64
 }
 
-//MakeMetricsHandler creates exposes function/node metrics
+// MakeMetricsHandler creates exposes function/node metrics
 func MakeMetricsHandler(fs *FunctionStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Body != nil {
@@ -28,6 +28,15 @@ func MakeMetricsHandler(fs *FunctionStore) http.HandlerFunc {
 		// 	}
 		// // log.Println("HERE", metrics)
 		// jsonOut, marshalErr := json.Marshal(metrics)
+
+		switch action := r.Header.Get("action"); action {
+		case "flush":
+			timec.ClearDurationLog()
+		case "write":
+			timec.WriteDurationLog()
+		}
+
+		timec.WriteDurationLog()
 
 		jsonOut, marshalErr := json.Marshal(timec.TimeLog)
 		if marshalErr != nil {

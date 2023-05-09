@@ -8,9 +8,9 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
-	"strconv"
 
 	"github.com/gorilla/mux"
 	"github.com/openfaas/faas-provider/httputil"
@@ -104,7 +104,7 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 		}
 	}
 	proxyElapsed := time.Since(proxyStart)
-	timec.RecordDuration("Proxy-Request-Time-" + functionName + "-" + strconv.FormatBool(coldStart), proxyStart)
+	timec.RecordDuration("function_proxy.proxyRequest.[ProxyRequestTime]_"+functionName+"-"+strconv.FormatBool(coldStart), proxyStart)
 
 	if err != nil || response.StatusCode != 200 {
 		log.Printf("[retryProxyRequest] Unable to contact function %s with status code %d and error : %s \n", functionName, response.StatusCode, err)

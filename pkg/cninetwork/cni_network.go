@@ -17,6 +17,7 @@ import (
 	"github.com/containerd/containerd"
 	gocni "github.com/containerd/go-cni"
 	"github.com/pkg/errors"
+	"github.gatech.edu/faasedge/fecore/pkg/timec"
 )
 
 const (
@@ -78,6 +79,7 @@ var defaultCNIConf = fmt.Sprintf(`
 
 // InitNetwork writes configlist file and initializes CNI network
 func InitNetwork() (gocni.CNI, error) {
+	defer timec.RecordDuration("cni_network.InitNetwork", time.Now())
 
 	log.Printf("Writing network config...\n")
 	if !dirExists(CNIConfDir) {
@@ -112,6 +114,7 @@ func InitNetwork() (gocni.CNI, error) {
 
 // CreateCNINetwork creates a CNI network interface and attaches it to the context
 func CreateCNINetwork(ctx context.Context, cni gocni.CNI, task containerd.Task, labels map[string]string) (*gocni.CNIResult, error) {
+	defer timec.RecordDuration("cni_network.CreateCNINetwork", time.Now())
 	id := netID(task)
 	netns := netNamespace(task)
 	result, err := cni.Setup(ctx, id, netns, gocni.WithLabels(labels))
@@ -123,20 +126,19 @@ func CreateCNINetwork(ctx context.Context, cni gocni.CNI, task containerd.Task, 
 }
 
 func CreateWasmCNINetwork(ctx context.Context, cni gocni.CNI, name string, pid int, labels map[string]string) (*gocni.CNIResult, error) {
-	start := time.Now()
+	defer timec.RecordDuration("cni_network.CreateWasmCNINetwork", time.Now())
 	id := fmt.Sprintf("%s-%d", name, pid)
 	netns := fmt.Sprintf(NetNSPathFmt, pid)
 	result, err := cni.Setup(ctx, id, netns, gocni.WithLabels(labels))
 	if err != nil {
 		return nil, errors.Wrapf(err, "Failed to setup network for task %q: %v", id, err)
 	}
-	duration := time.Since(start)
-	log.Printf("[CreateWasmCNINetwork] WASM CNI setup for '%s' took %d ms", name, duration.Milliseconds())
 	return result, nil
 }
 
 // DeleteCNINetwork deletes a CNI network based on task ID and Pid
 func DeleteCNINetwork(ctx context.Context, cni gocni.CNI, client *containerd.Client, name string) error {
+	defer timec.RecordDuration("cni_network.DeleteCNINetwork", time.Now())
 	container, containerErr := client.LoadContainer(ctx, name)
 	if containerErr == nil {
 		task, err := container.Task(ctx, nil)
@@ -162,6 +164,7 @@ func DeleteCNINetwork(ctx context.Context, cni gocni.CNI, client *containerd.Cli
 }
 
 func DeleteWasmCNINetwork(ctx context.Context, cni gocni.CNI, client *containerd.Client, name string, pid int) error {
+	defer timec.RecordDuration("cni_network.DeleteWasmCNINetwork", time.Now())
 
 	log.Printf("[DeleteWasmCNINetwork] removing CNI network for '%s'\n", name)
 

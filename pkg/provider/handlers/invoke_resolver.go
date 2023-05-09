@@ -67,7 +67,7 @@ func (i *InvokeResolver) Resolve(functionName string) (url.URL, bool, error) {
 			log.Printf("[Invoke] Error creating new replica for Function %s: %s", function.name, err)
 			return url.URL{}, false, err
 		} else {
-			timec.RecordDuration("Create-Replica-Time-" + replicaName, startTime)
+			timec.RecordDuration("invoke_resolver.Resolve.[CreateReplicaTime]_"+replicaName, startTime)
 			coldStartTime := time.Since(startTime)
 			replicaIP = function.activeReplicas[replicaName]
 			i.fs.AddActiveReplica(function.name, replicaName, replicaIP)

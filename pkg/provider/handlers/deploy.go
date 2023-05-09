@@ -189,7 +189,7 @@ func deploy(ctx context.Context, req types.FunctionDeployment, client *container
 	startTime := time.Now()
 	replicaName, createReplicaStatus := createReplica(client, cni, fn, false)
 	if createReplicaStatus == nil {
-		timec.RecordDuration("Create-Replica-Time-" + replicaName, startTime)
+		timec.RecordDuration("deploy.deploy.[CreateReplicaTime]_"+replicaName, startTime)
 		coldStartTime := time.Since(startTime)
 		fs.RecordColdStartTime(coldStartTime)
 		log.Printf("[deploy] Created container '%s' for Function '%s'", replicaName, fn.name)
