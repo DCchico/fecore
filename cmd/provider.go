@@ -99,7 +99,7 @@ func makeProviderCmd() *cobra.Command {
 		fs, err := handlers.InitFunctionStore(storageManager)
 
 		go func() {
-			gocron.Every(200).Second().Do(fs.CleanupDaemon, client, cni) // TODO 200 sec hardcoded
+			gocron.Every(3600).Second().Do(fs.CleanupDaemon, client, cni) // TODO 200 sec hardcoded
 			<-gocron.Start()
 		}()
 
@@ -127,7 +127,7 @@ func makeProviderCmd() *cobra.Command {
 			LogHandler:           logs.NewLogHandlerFunc(fecorelogs.New(), config.ReadTimeout),
 		}
 
-		bootstrap.Router().HandleFunc("/metrics", handlers.MakeMetricsHandler(fs))
+		bootstrap.Router().HandleFunc("/timec", handlers.MakeMetricsHandler(fs))
 		bootstrap.Router().HandleFunc("/ipam", handlers.MakeIPAMHandler(fs))
 
 		log.Printf("Listening on TCP port: %d\n", *config.TCPPort)
