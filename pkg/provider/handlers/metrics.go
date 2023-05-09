@@ -3,6 +3,8 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
+
+	"github.gatech.edu/faasedge/fecore/pkg/timec"
 )
 
 //MakeMetricsHandler creates exposes function/node metrics
@@ -12,7 +14,7 @@ func MakeMetricsHandler(fs *FunctionStore) http.HandlerFunc {
 			defer r.Body.Close()
 		}
 
-		jsonOut, marshalErr := json.Marshal(fs.GetColdStartTimes())
+		jsonOut, marshalErr := json.Marshal(timec.TimeLog)
 		if marshalErr != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			return

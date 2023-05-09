@@ -18,6 +18,7 @@ import (
 	"github.com/openfaas/faas-provider/proxy"
 
 	"github.gatech.edu/faasedge/fecore/pkg/provider/handlers"
+	"github.gatech.edu/faasedge/fecore/pkg/timec"
 )
 
 const (
@@ -102,6 +103,7 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 		}
 	}
 	proxyElapsed := time.Since(proxyStart)
+	timec.RecordDuration("Proxy-Request-Time-" + functionName, proxyStart)
 
 	if err != nil || response.StatusCode != 200 {
 		log.Printf("[retryProxyRequest] Unable to contact function %s with status code %d and error : %s \n", functionName, response.StatusCode, err)
