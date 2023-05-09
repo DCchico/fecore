@@ -27,6 +27,7 @@ import (
 	"github.com/pkg/errors"
 	cninetwork "github.gatech.edu/faasedge/fecore/pkg/cninetwork"
 	"github.gatech.edu/faasedge/fecore/pkg/service"
+	"github.gatech.edu/faasedge/fecore/pkg/timec"
 	"k8s.io/apimachinery/pkg/api/resource"
 )
 
@@ -188,6 +189,7 @@ func deploy(ctx context.Context, req types.FunctionDeployment, client *container
 	startTime := time.Now()
 	replicaName, createReplicaStatus := createReplica(client, cni, fn, false)
 	if createReplicaStatus == nil {
+		timec.RecordDuration("Create-Replica-Time-" + replicaName, startTime)
 		coldStartTime := time.Since(startTime)
 		fs.RecordColdStartTime(coldStartTime)
 		log.Printf("[deploy] Created container '%s' for Function '%s'", replicaName, fn.name)

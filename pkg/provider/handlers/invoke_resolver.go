@@ -10,6 +10,7 @@ import (
 	"github.com/containerd/containerd"
 	gocni "github.com/containerd/go-cni"
 	fecore "github.gatech.edu/faasedge/fecore/pkg"
+	"github.gatech.edu/faasedge/fecore/pkg/timec"
 )
 
 const watchdogPort = 8080
@@ -66,6 +67,7 @@ func (i *InvokeResolver) Resolve(functionName string) (url.URL, bool, error) {
 			log.Printf("[Invoke] Error creating new replica for Function %s: %s", function.name, err)
 			return url.URL{}, false, err
 		} else {
+			timec.RecordDuration("Create-Replica-Time-" + replicaName, startTime)
 			coldStartTime := time.Since(startTime)
 			replicaIP = function.activeReplicas[replicaName]
 			i.fs.AddActiveReplica(function.name, replicaName, replicaIP)
