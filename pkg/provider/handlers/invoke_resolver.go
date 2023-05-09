@@ -24,7 +24,7 @@ func NewInvokeResolver(client *containerd.Client, cni gocni.CNI, fs *FunctionSto
 	return &InvokeResolver{client: client, cni: cni, fs: fs}
 }
 
-func (i *InvokeResolver) Resolve(functionName string) (url.URL, error) {
+func (i *InvokeResolver) Resolve(functionName string) (url.URL, bool, error) {
 	actualFunctionName := functionName
 	log.Printf("Resolve: %q\n", actualFunctionName)
 
@@ -40,28 +40,31 @@ func (i *InvokeResolver) Resolve(functionName string) (url.URL, error) {
 	function, er := i.fs.GetDeployedFunction(actualFunctionName)
 	if er != nil {
 		log.Printf("[Invoke] Error retrieving function '%s': %s", actualFunctionName, er)
-		return url.URL{}, er
+		return url.URL{}, false, er
 	}
 
 	var replicaName string
 	var replicaIP string
 	var err error
+	var coldStart bool
 	/* Get the next idle replica if there is at least 1 available (warm start);
 	 * otherwise create new replica (cold start) */
 	if len(function.idleReplicas) > 0 {
+		coldStart = false
 		replicaName, replicaIP, err = i.fs.GetIdleReplica(actualFunctionName)
 		if err != nil {
 			log.Printf("[Invoke] Error retrieving idle replica for Function '%s': %s", function.name, err)
-			return url.URL{}, err
+			return url.URL{}, false, err
 		}
 		log.Printf("[Invoke] Using idle replica '%s' for Function '%s'", replicaName, function.name)
 	} else {
+		coldStart = true
 		log.Printf("[Invoke] Creating new replica for Function '%s'", function.name)
 		startTime := time.Now()
 		replicaName, err := createReplica(i.client, i.cni, &function, true)
 		if err != nil {
 			log.Printf("[Invoke] Error creating new replica for Function %s: %s", function.name, err)
-			return url.URL{}, err
+			return url.URL{}, false, err
 		} else {
 			coldStartTime := time.Since(startTime)
 			replicaIP = function.activeReplicas[replicaName]
@@ -75,10 +78,10 @@ func (i *InvokeResolver) Resolve(functionName string) (url.URL, error) {
 
 	urlRes, err := url.Parse(urlStr)
 	if err != nil {
-		return url.URL{}, err
+		return url.URL{}, false, err
 	}
 
-	return *urlRes, nil
+	return *urlRes, coldStart, nil
 }
 
 func getNamespace(name, defaultNamespace string) string {

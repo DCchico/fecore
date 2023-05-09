@@ -109,7 +109,7 @@ func createReplica(client *containerd.Client, cni gocni.CNI, fn *Function, setAc
 
 	image, err := service.PrepareImage(ctx, client, fn.image, snapshotter, false)
 	if err != nil {
-		return "", fmt.Errorf("[createReplica] Unable to pull image %s", fn.image)
+		return "", fmt.Errorf("[createReplica] Unable to pull image %s, %w", fn.image, err)
 	}
 
 	envs := prepareEnv(fn.envProcess, fn.envVars)

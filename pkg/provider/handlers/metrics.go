@@ -2,10 +2,17 @@ package handlers
 
 import (
 	"encoding/json"
+	// "log"
 	"net/http"
 
 	"github.gatech.edu/faasedge/fecore/pkg/timec"
 )
+
+type MetricsExport struct {
+    ColdStart       []int64
+    InvocationCold  []int64
+	InvocationWarm  []int64
+}
 
 //MakeMetricsHandler creates exposes function/node metrics
 func MakeMetricsHandler(fs *FunctionStore) http.HandlerFunc {
@@ -13,6 +20,14 @@ func MakeMetricsHandler(fs *FunctionStore) http.HandlerFunc {
 		if r.Body != nil {
 			defer r.Body.Close()
 		}
+
+		// metrics := &MetricsExport{
+		// 		ColdStart: fs.GetColdStartTimes(),
+		// 		InvocationCold: fs.GetInvocationTime(true),
+		// 		InvocationWarm: fs.GetInvocationTime(false),
+		// 	}
+		// // log.Println("HERE", metrics)
+		// jsonOut, marshalErr := json.Marshal(metrics)
 
 		jsonOut, marshalErr := json.Marshal(timec.TimeLog)
 		if marshalErr != nil {
