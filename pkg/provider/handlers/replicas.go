@@ -79,7 +79,8 @@ func createReplica(client *containerd.Client, cni gocni.CNI, fn *Function, setAc
 	ctx := namespaces.WithNamespace(context.Background(), fn.namespace)
 
 	if val, ok := fn.labels["module.wasm.image/variant"]; ok && (val == "compat-smart" || val == "compat") {
-		wasmName, wasmPid, err := createWasmReplica(fn, setActive)
+		wasmName, wasmCmd, err := createWasmReplica(fn, setActive)
+		wasmPid := wasmCmd.Process.Pid
 		if err == nil {
 			/* Setup CNI for PID */
 			//cniResult, err := cninetwork.CreateWasmCNINetwork(ctx, cni, wasmName, wasmPid, fn.labels)
@@ -92,6 +93,7 @@ func createReplica(client *containerd.Client, cni gocni.CNI, fn *Function, setAc
 			log.Printf("IP for '%s' = %s", wasmName, result.Interfaces["eth1"].IPConfigs[0].IP)
 			// Store UUID,PID in fn
 			ip := result.Interfaces["eth1"].IPConfigs[0].IP.String()
+			wasmCmd.Process.Signal(syscall.SIGUSR1)
 			if setActive {
 				fn.activeReplicas[wasmName] = ip
 			} else {
@@ -224,7 +226,7 @@ func setupWasmStorage(fn *Function, name string) error {
 	return nil
 }
 
-func createWasmReplica(fn *Function, setActive bool) (string, int, error) {
+func createWasmReplica(fn *Function, setActive bool) (string, *exec.Cmd, error) {
 	// WASM_IMAGES_ROOT := "/mnt/faasedge/images"
 	/* Generate UUID */
 	name := fn.name + "-" + uuid.New().String()
@@ -232,27 +234,26 @@ func createWasmReplica(fn *Function, setActive bool) (string, int, error) {
 	/* Create unique dir for replica and setup reflinks */
 	err := setupWasmStorage(fn, name)
 	if err != nil {
-		return "", -1, err
+		return "", nil, err
 	}
 	/* Exec wasmedge to create container process, retrieve PID */
 	container_wasm_file := fn.image + "/" + "function.wasm"
 	container_dir_arg := ".:" + fn.image + "/replicas/" + name
-	cmd := exec.Command("wasmedge", "--dir", container_dir_arg, container_wasm_file)
+	cmd := exec.Command("/mnt/faasedge/runw", container_wasm_file, container_dir_arg)
 
-	cmd.Env = append(cmd.Environ(), "WASMEDGE_PLUGIN_PATH=/wasmedge/")
-	cmd.Env = append(cmd.Environ(), "LD_LIBRARY_PATH=\"/lib/:/wasmedge/\"")
+	// cmd.Env = append(cmd.Environ(), "WASMEDGE_PLUGIN_PATH=/wasmedge/")
+	// cmd.Env = append(cmd.Environ(), "LD_LIBRARY_PATH=\"/lib/:/wasmedge/\"")
 
 	cmd.SysProcAttr = &syscall.SysProcAttr{Unshareflags: syscall.CLONE_NEWNET}
 
 	err = cmd.Start()
 
 	if err == nil {
-		pid := cmd.Process.Pid
-		log.Printf("[createWasmReplica] WASM container '%s' started (PID = %d)", name, pid)
+		log.Printf("[createWasmReplica] Created WASM container '%s'", name)
 
-		return name, pid, nil
+		return name, cmd, nil
 	}
 
 	log.Printf("[createWasmReplica] Error starting WASM container '%s'", name)
-	return "", -1, err
+	return "", nil, err
 }
