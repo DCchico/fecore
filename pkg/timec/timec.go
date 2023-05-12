@@ -19,7 +19,7 @@ func ClearDurationLog() {
 }
 
 func WriteDurationLog() {
-	filename := fmt.Sprintf("/tmp/timec-%d.log", time.Now().UnixMilli())
+	filename := fmt.Sprintf("/mnt/faasedge/logs/timec-%d.log", time.Now().UnixMilli())
 	f, err := os.OpenFile(filename, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
 	if err != nil {
 		log.Fatalf("Error opening log file: %v", err)
