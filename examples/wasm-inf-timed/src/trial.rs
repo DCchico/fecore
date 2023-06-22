@@ -1,0 +1,217 @@
+#![deny(warnings)]
+
+use std::convert::TryInto;
+use image::{self, io::Reader, DynamicImage};
+use std::path::Path;
+use std::fs;
+// use std::env;
+use wasi_nn;
+
+use std::convert::Infallible;
+
+use hyper::service::{make_service_fn, service_fn};
+use hyper::{Body, Request, Response, Server};
+
+async fn hello(_: Request<Body>) -> Result<Response<Body>, Infallible> {
+    run_model().await;
+    Ok(Response::new(Body::from("WASM: Hello World!\n")))
+}
+
+#[tokio::main(flavor = "current_thread")]
+async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    // pretty_env_logger::init();
+
+    // For every connection, we must make a `Service` to handle all
+    // incoming HTTP requests on said connection.
+    let make_svc = make_service_fn(|_conn| {
+        // This is the `Service` that will handle the connection.
+        // `service_fn` is a helper to convert a function that
+        // returns a Response into a `Service`.
+        async { Ok::<_, Infallible>(service_fn(hello)) }
+    });
+
+    let addr = ([0, 0, 0, 0], 8080).into();
+
+    let server = Server::bind(&addr).serve(make_svc);
+
+    println!("Listening on http://{}", addr);
+
+    server.await?;
+
+    Ok(())
+}
+
+async fn run_model() {
+// pub fn main() {
+    // let _args: Vec<String> = env::args().collect();
+    // let model_path = "."; // &args[1];
+    // let model_name =  "mobilenet"; // &args[2];
+    //let image_path =  "bird.jpg"; // &args[3];
+    let tensor_height =  224; //  args[4].parse::<u32>().unwrap();
+    let tensor_width =  224; //  args[5].parse::<u32>().unwrap();
+    // let precision =  &"f32".to_owned(); //  &args[6];
+    // let tensor_type = get_type(precision);
+
+    // let xml = fs::read_to_string(model_path.to_owned() + "/" + &model_name + ".xml").unwrap();
+    // println!("Read graph XML, first 50 characters: {}", &xml[..50]);
+
+    // let weights = fs::read(model_path.to_owned() + "/" + &model_name + ".bin").unwrap();
+    let weights = fs::read("lite-model_aiy_vision_classifier_birds_V1_3.tflite").unwrap();
+    println!("Read graph weights, size in bytes: {}", weights.len());
+
+
+    let graph = unsafe {
+        wasi_nn::load(
+            &[&weights],
+            4, // encoding for tflite: wasi_nn::GRAPH_ENCODING_TENSORFLOWLITE
+            // wasi_nn::GRAPH_ENCODING_OPENVINO,
+            wasi_nn::EXECUTION_TARGET_CPU,
+        )
+        .unwrap()
+    };
+    println!("Loaded graph into wasi-nn with ID: {}", graph);
+
+    let context = unsafe { wasi_nn::init_execution_context(graph).unwrap() };
+    println!("Created wasi-nn execution context with ID: {}", context);
+
+    // let bytes = image_to_bytes(image_path.to_string(), tensor_height, tensor_width, tensor_type);
+    //let tensor_data = image_to_tensor(image_path.to_string(), tensor_height, tensor_width);
+    let tensor_data = fs::read("birdx224x224x3.rgb").unwrap();
+    println!("Read tensor, size in bytes: {} (tensor_width={}, tensor_height={}", tensor_data.len(), tensor_width, tensor_height);
+    println!("Image to bytes");
+
+    // Load a tensor that precisely matches the graph input tensor (see
+    // `fixture/frozen_inference_graph.xml`).
+    // let tensor_data = fs::read(tensor_path).unwrap();
+    // println!("Read input tensor, size in bytes: {}", tensor_data.len());
+    // let tensor = wasi_nn::Tensor {
+    //     dimensions: &[1, 3, tensor_height, tensor_width],
+    //     r#type: tensor_type,
+    //     data: bytes.as_slice(),
+    // };
+    let tensor = wasi_nn::Tensor {
+        dimensions: &[1, tensor_height, tensor_height, 3],
+        r#type: 2,
+        data: &tensor_data,
+    };
+
+    unsafe {
+        wasi_nn::set_input(context, 0, tensor).unwrap();
+    }
+
+    // Execute the inference.
+    unsafe {
+        wasi_nn::compute(context).unwrap();
+    }
+    println!("Executed graph inference");
+
+    // Retrieve the output.
+    let mut output_buffer = vec![0u8; 965];
+    unsafe {
+        wasi_nn::get_output(
+            context,
+            0,
+            &mut output_buffer[..] as *mut [u8] as *mut u8,
+            output_buffer.len().try_into().unwrap(),
+        )
+        .unwrap();
+    }
+
+    let results = sort_results(&output_buffer);
+    for i in 0..5 {
+        println!(
+            "   {}.) [{}]({:.4})",
+            i + 1,
+            results[i].0,
+            results[i].1,
+            // imagenet_classes::AIY_BIRDS_V1[results[i].0]
+        );
+    }
+    // // Retrieve the output.
+    // let mut output_buffer = vec![0f32; 1001];
+    // unsafe {
+    //     wasi_nn::get_output(
+    //         context,
+    //         0,
+    //         &mut output_buffer[..] as *mut [f32] as *mut u8,
+    //         (output_buffer.len() * 4).try_into().unwrap(),
+    //     )
+    //     .unwrap();
+    // }
+    // println!(
+    //     "Found results, sorted top 5: {:?}",
+    //     &sort_results(&output_buffer)[..5]
+    // )
+}
+
+// fn get_type(precision: &String) -> wasi_nn::TensorType {
+//     match precision .as_str() {
+//         "f16" => wasi_nn::TENSOR_TYPE_F16,
+//         "f32" => wasi_nn::TENSOR_TYPE_F32,
+//         _ => wasi_nn::TENSOR_TYPE_U8,
+//     }
+// }
+
+// Sort the buffer of probabilities. The graph places the match probability for each class at the
+// index for that class (e.g. the probability of class 42 is placed at buffer[42]). Here we convert
+// to a wrapping InferenceResult and sort the results. It is unclear why the MobileNet output
+// indices are "off by one" but the `.skip(1)` below seems necessary to get results that make sense
+// (e.g. 763 = "revolver" vs 762 = "restaurant")
+fn sort_results(buffer: &[u8]) -> Vec<InferenceResult> {
+    let mut results: Vec<InferenceResult> = buffer
+        .iter()
+        .skip(1)
+        .enumerate()
+        .map(|(c, p)| InferenceResult(c, (*p).into()))
+        .collect();
+    results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+    results
+}
+
+/*
+fn image_to_tensor(path: String, height: u32, width: u32) -> Vec<u8> {
+    let pixels = Reader::open(path).unwrap().decode().unwrap();
+    let dyn_img: DynamicImage = pixels.resize_exact(width, height, image::imageops::Triangle);
+    let bgr_img = dyn_img.to_rgb8();
+    // Get an array of the pixel values
+    let raw_u8_arr: &[u8] = &bgr_img.as_raw()[..];
+    return raw_u8_arr.to_vec();
+}
+*/
+
+pub fn image_to_bytes(
+    path: impl AsRef<Path>,
+    nheight: u32,
+    nwidth: u32,
+    tensor_type: wasi_nn::TensorType,
+) -> Vec<u8> {
+    println!("Image to bytes");
+    let pixels = Reader::open(path.as_ref()).expect("REASON").decode();
+    println!("Image to bytes");
+    let dyn_img: DynamicImage = pixels.expect("REASON").resize_exact(nwidth, nheight, image::imageops::Triangle);
+    let bgr_img = dyn_img.to_bgr8();
+    // Get an array of the pixel values
+    let raw_u8_arr: &[u8] = &bgr_img.as_raw()[..];
+    let u8_arr = match tensor_type {
+        wasi_nn::TENSOR_TYPE_F32 => {
+            // Create an array to hold the f32 value of those pixels
+            let bytes_required = raw_u8_arr.len() * 4;
+            let mut u8_arr: Vec<u8> = vec![0; bytes_required];
+            for i in 0..raw_u8_arr.len() {
+                // Read the number as a f32 and break it into u8 bytes
+                let u8_f32: f32 = raw_u8_arr[i] as f32;
+                let u8_bytes = u8_f32.to_ne_bytes();
+                for j in 0..4 {
+                    u8_arr[(i * 4) + j] = u8_bytes[j];
+                }
+            }
+            u8_arr
+        }
+        _ => raw_u8_arr.to_vec(),
+    };
+    u8_arr
+}
+
+// A wrapper for class ID and match probabilities.
+#[derive(Debug, PartialEq)]
+struct InferenceResult(usize, f32);

@@ -1,0 +1,14 @@
+FROM scratch
+COPY ./target/wasm32-wasi/debug/wasm-inference-aot.wasm /
+# COPY ./mobilenet.xml /
+# COPY ./mobilenet.bin /
+# COPY ./car.png /
+COPY ./data/lite-model_aiy_vision_classifier_birds_V1_3.tflite /
+COPY ./data/bird.jpg /
+COPY ./data/birdx224x224x3.rgb /
+
+# COPY ./lib/libtensorflowlite_c.so /lib/
+# COPY ./lib/libwasmedgePluginWasiNN.so /wasmedge/
+# COPY ./lib/libwasmedge.so /wasmedge/
+
+CMD ["/wasm-inference.wasm"]
