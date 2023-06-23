@@ -16,6 +16,8 @@ import (
 	"github.com/openfaas/faas-provider/httputil"
 	"github.com/openfaas/faas-provider/types"
 
+	"github.com/google/uuid"
+
 	"github.com/openfaas/faas-provider/proxy"
 
 	"github.gatech.edu/faasedge/fecore/pkg/provider/handlers"
@@ -61,12 +63,14 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 
 	pathVars := mux.Vars(originalReq)
 	functionName := pathVars["name"]
+	requestID := functionName + "-" + uuid.New().String()
+	defer timec.RecordDuration("(function_proxy.go) proxyRequest() <requestID="+requestID+">", time.Now())
 	if functionName == "" {
 		httputil.Errorf(w, http.StatusBadRequest, "Provide function name in the request path")
 		return
 	}
 
-	functionAddr, coldStart, resolveErr := resolver.Resolve(functionName)
+	functionAddr, coldStart, resolveErr := resolver.Resolve(functionName, requestID)
 	if resolveErr != nil {
 		// TODO: Should record the 404/not found error in Prometheus.
 		log.Printf("resolver error: no endpoints for %s: %s\n", functionName, resolveErr.Error())
@@ -89,29 +93,37 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 	var response *http.Response
 	maxRetries := 1000
 	connectionRetries := 0
-	sleepQuantum := 5
+	totalConnectTime := 0
+	sleepQuantum := 1
 
 	proxyStart := time.Now()
-	/* First, try and establish connection to port 8080 */
+	connStart := time.Now()
+
+	ip := strings.Split(functionAddr.Host, ":")[0]
+
 	for connectionRetries < maxRetries {
+		connStart = time.Now()
 		response, err = proxyClient.Do(proxyReq.WithContext(ctx))
 		if err != nil {
-			time.Sleep(time.Duration(sleepQuantum) * time.Millisecond)
-			sleepQuantum += 5
+			//log.Printf("[function_proxy] Err connecting to function: %s", err.Error())
+			//sleepQuantum += 5
 			connectionRetries += 1
+			time.Sleep(time.Duration(sleepQuantum) * time.Millisecond)
 		} else {
+			totalConnectTime := connStart.Sub(proxyStart).Milliseconds()
+			log.Printf("[function_proxy] Success connecting to function <requestID=%s, totalConnectTime=%d>", requestID, totalConnectTime)
 			break
 		}
 	}
+
 	proxyElapsed := time.Since(proxyStart)
-	timec.RecordDuration("function_proxy.proxyRequest.[ProxyRequestTime]_"+functionName+"-"+strconv.FormatBool(coldStart), proxyStart)
+	timec.RecordDuration("(function_proxy.go) proxyRequest() : [ProxyRequestTime] <requestID="+requestID+", coldStart="+strconv.FormatBool(coldStart)+", retries="+strconv.Itoa(connectionRetries)+", connectTime="+strconv.Itoa(totalConnectTime)+" ms>", proxyStart)
 
 	if err != nil || response.StatusCode != 200 {
 		log.Printf("[retryProxyRequest] Unable to contact function %s with status code %d and error : %s \n", functionName, response.StatusCode, err)
 		httputil.Errorf(w, http.StatusInternalServerError, "Can't reach service for '%s'", functionName)
 		return
 	}
-	// log.Printf("[retryProxyRequest] First return code received from proxyClient is %d", response.StatusCode)
 
 	if response.Body != nil {
 		defer response.Body.Close()
@@ -121,7 +133,7 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 		connectionRetries)
 	fs.RecordInvocationTime(proxyElapsed, coldStart)
 
-	ip := strings.Split(functionAddr.Host, ":")[0]
+	ip = strings.Split(functionAddr.Host, ":")[0]
 	err = fs.UpdateReplicaStatusInactive(functionName, ip)
 	if err != nil {
 		log.Printf("[function_proxy] Unable to update function replica status '%s': %s\n", proxyReq.URL.String(), err.Error())
@@ -132,6 +144,7 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 	clientHeader := w.Header()
 	copyHeaders(clientHeader, &response.Header)
 	w.Header().Set("Content-Type", getContentType(originalReq.Header, response.Header))
+	w.Header().Set("Request-ID", requestID)
 
 	w.WriteHeader(response.StatusCode)
 	if response.Body != nil {
