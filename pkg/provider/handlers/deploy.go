@@ -122,7 +122,7 @@ func prepull(ctx context.Context, req types.FunctionDeployment, client *containe
 		snapshotter = val
 	}
 
-	image, err := service.PrepareImage(ctx, client, imgRef, snapshotter, alwaysPull)
+	image, err := service.PrepareImage(ctx, client, imgRef, "prepull", snapshotter, alwaysPull)
 	if err != nil {
 		return nil, errors.Wrapf(err, "unable to pull image %s", imgRef)
 	}
@@ -187,9 +187,8 @@ func deploy(ctx context.Context, req types.FunctionDeployment, client *container
 	fn.memoryLimit = 50000000 // TODO probably bug in crun latest version
 
 	startTime := time.Now()
-	replicaName, createReplicaStatus := createReplica(client, cni, fn, false)
+	replicaName, createReplicaStatus := createReplica(client, cni, fs, fn, "Deploy", false)
 	if createReplicaStatus == nil {
-		timec.RecordDuration("deploy.deploy.[CreateReplicaTime]_"+replicaName, startTime)
 		coldStartTime := time.Since(startTime)
 		fs.RecordColdStartTime(coldStartTime)
 		log.Printf("[deploy] Created container '%s' for Function '%s'", replicaName, fn.name)
@@ -223,7 +222,8 @@ func buildLabels(request *types.FunctionDeployment) (map[string]string, error) {
 	return labels, nil
 }
 
-func createTask(ctx context.Context, container containerd.Container, cni gocni.CNI) (string, error) {
+func createTask(ctx context.Context, container containerd.Container, requestID string, cni gocni.CNI) (string, error) {
+	defer timec.RecordDuration("(deploy.go) createTask() <requestID="+requestID+">", time.Now())
 
 	name := container.ID()
 
