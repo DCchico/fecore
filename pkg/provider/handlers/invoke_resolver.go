@@ -25,9 +25,10 @@ func NewInvokeResolver(client *containerd.Client, cni gocni.CNI, fs *FunctionSto
 	return &InvokeResolver{client: client, cni: cni, fs: fs}
 }
 
-func (i *InvokeResolver) Resolve(functionName string) (url.URL, bool, error) {
+func (i *InvokeResolver) Resolve(functionName string, requestID string) (url.URL, bool, error) {
+	defer timec.RecordDuration("(invoke_resolver.go) Resolve() <requestID="+requestID+">", time.Now())
 	actualFunctionName := functionName
-	log.Printf("Resolve: %q\n", actualFunctionName)
+	log.Printf("Resolve: %q (requestID=%s)\n", actualFunctionName, requestID)
 
 	namespace := getNamespace(functionName, fecore.DefaultFunctionNamespace)
 
@@ -62,12 +63,12 @@ func (i *InvokeResolver) Resolve(functionName string) (url.URL, bool, error) {
 		coldStart = true
 		log.Printf("[Invoke] Creating new replica for Function '%s'", function.name)
 		startTime := time.Now()
-		replicaName, err := createReplica(i.client, i.cni, &function, true)
+		replicaName, err := createReplica(i.client, i.cni, i.fs, &function, requestID, true)
 		if err != nil {
 			log.Printf("[Invoke] Error creating new replica for Function %s: %s", function.name, err)
 			return url.URL{}, false, err
 		} else {
-			timec.RecordDuration("invoke_resolver.Resolve.[CreateReplicaTime]_"+replicaName, startTime)
+			timec.RecordDuration("(invoke_resolver.go).Resolve.[CreateReplicaTime] <requestID="+requestID+">", startTime)
 			coldStartTime := time.Since(startTime)
 			replicaIP = function.activeReplicas[replicaName]
 			i.fs.AddActiveReplica(function.name, replicaName, replicaIP)
