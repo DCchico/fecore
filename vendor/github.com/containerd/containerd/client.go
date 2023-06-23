@@ -66,6 +66,8 @@ import (
 	"google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/health/grpc_health_v1"
+
+	"github.gatech.edu/faasedge/fecore/pkg/timec"
 )
 
 func init() {
@@ -268,7 +270,8 @@ func (c *Client) Containers(ctx context.Context, filters ...string) ([]Container
 
 // NewContainer will create a new container with the provided id.
 // The id must be unique within the namespace.
-func (c *Client) NewContainer(ctx context.Context, id string, opts ...NewContainerOpts) (Container, error) {
+func (c *Client) NewContainer(ctx context.Context, id string, requestID string, opts ...NewContainerOpts) (Container, error) {
+	defer timec.RecordDuration("(client.go) NewContainer() <requestID="+requestID+">", time.Now())
 	ctx, done, err := c.WithLease(ctx)
 	if err != nil {
 		return nil, err
@@ -498,6 +501,7 @@ func (c *Client) ListImages(ctx context.Context, filters ...string) ([]Image, er
 
 // Restore restores a container from a checkpoint
 func (c *Client) Restore(ctx context.Context, id string, checkpoint Image, opts ...RestoreOpts) (Container, error) {
+	requestID := "Restore"
 	store := c.ContentStore()
 	index, err := decodeIndex(ctx, store, checkpoint.Target())
 	if err != nil {
@@ -515,7 +519,7 @@ func (c *Client) Restore(ctx context.Context, id string, checkpoint Image, opts 
 		copts = append(copts, o(ctx, id, c, checkpoint, index))
 	}
 
-	ctr, err := c.NewContainer(ctx, id, copts...)
+	ctr, err := c.NewContainer(ctx, id, requestID, copts...)
 	if err != nil {
 		return nil, err
 	}

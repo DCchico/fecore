@@ -115,7 +115,7 @@ func (s *Supervisor) Start(svcs []Service) error {
 
 		imgRef := reference.TagNameOnly(r).String()
 
-		img, err := service.PrepareImage(ctx, s.client, imgRef, defaultSnapshotter, faasServicesPullAlways)
+		img, err := service.PrepareImage(ctx, s.client, imgRef, svc.Name, defaultSnapshotter, faasServicesPullAlways)
 		if err != nil {
 			return err
 		}
@@ -202,6 +202,7 @@ func (s *Supervisor) Start(svcs []Service) error {
 
 		newContainer, err := s.client.NewContainer(
 			ctx,
+			svc.Name,
 			svc.Name,
 			containerd.WithImage(image),
 			containerd.WithNewSnapshot(svc.Name+"-snapshot", image),
