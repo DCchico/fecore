@@ -182,7 +182,7 @@ func injectRuntimeConfig(orig *NetworkConfig, rt *RuntimeConf) (*NetworkConfig, 
 
 // ensure we have a usable exec if the CNIConfig was not given one
 func (c *CNIConfig) ensureExec() invoke.Exec {
-	defer timec.RecordDuration("libcni.api.ensureExec", time.Now())
+	defer timec.RecordDuration("(libcni/api.go) ensureExec()", time.Now())
 	if c.exec == nil {
 		c.exec = &invoke.DefaultExec{
 			RawExec:       &invoke.RawExec{Stderr: os.Stderr},
@@ -394,7 +394,7 @@ func (c *CNIConfig) GetNetworkCachedConfig(net *NetworkConfig, rt *RuntimeConf) 
 }
 
 func (c *CNIConfig) addNetwork(ctx context.Context, name, cniVersion string, net *NetworkConfig, prevResult types.Result, rt *RuntimeConf) (types.Result, error) {
-	defer timec.RecordDuration("libcni.api.addNetwork["+rt.ContainerID+"@"+rt.IfName+"_"+pluginDescription(net.Network)+"]", time.Now())
+	defer timec.RecordDuration("(libcni/api.go) addNetwork() <containerID="+rt.ContainerID+", ifName="+rt.IfName+", plugin="+pluginDescription(net.Network)+">", time.Now())
 	c.ensureExec()
 	pluginPath, err := c.exec.FindInPath(net.Network.Type, c.Path)
 	if err != nil {
@@ -420,7 +420,7 @@ func (c *CNIConfig) addNetwork(ctx context.Context, name, cniVersion string, net
 
 // AddNetworkList executes a sequence of plugins with the ADD command
 func (c *CNIConfig) AddNetworkList(ctx context.Context, list *NetworkConfigList, rt *RuntimeConf) (types.Result, error) {
-	defer timec.RecordDuration("libcni.api.AddNetworklist", time.Now())
+	defer timec.RecordDuration("(libcni/api.go) AddNetworklist() <containerID="+rt.ContainerID+", ifName="+rt.IfName+">", time.Now())
 	var err error
 	var result types.Result
 	for _, net := range list.Plugins {
