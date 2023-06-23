@@ -27,7 +27,7 @@ type FunctionStore struct {
 	deployedFunctions map[string]*Function
 	storageManager    storage.StorageManager
 
-	metricMu      sync.RWMutex
+	metricMu            sync.RWMutex
 	coldStartTimes      []int64
 	invocationTimesCold []int64 // cold and warm distinguish how many retries
 	invocationTimesWarm []int64
@@ -36,6 +36,13 @@ type FunctionStore struct {
 	nextIP net.IP
 	//ipconfigs map[string]string
 	ipconfigs sync.Map
+
+	/* Begin netns test */
+	nsMu      sync.RWMutex
+	nextNS    int64
+	netnsList []int64
+	nextNSIP  net.IP
+	/* End netns test */
 }
 
 func InitFunctionStore(storageManager storage.StorageManager) (*FunctionStore, error) {
@@ -45,6 +52,7 @@ func InitFunctionStore(storageManager storage.StorageManager) (*FunctionStore, e
 		storageManager:    storageManager,
 		metricMu:          sync.RWMutex{},
 		ipamMu:            sync.RWMutex{},
+		nsMu:              sync.RWMutex{},
 		//ipconfigs:         make(map[string]string),
 		ipconfigs: sync.Map{},
 	}
@@ -71,6 +79,11 @@ func InitFunctionStore(storageManager storage.StorageManager) (*FunctionStore, e
 	// log.Println(fs.deployedFunctions)
 
 	fs.nextIP = net.IPv4(10, 62, 0, 1)
+
+	/* Begin netns test */
+	fs.nextNS = 10
+	fs.nextNSIP = net.IPv4(10, 62, 100, 10)
+	/* End netns test */
 
 	return &fs, nil
 }
@@ -257,7 +270,7 @@ func (fs *FunctionStore) RecordInvocationTime(time time.Duration, coldStart bool
 	}
 }
 
-func (fs *FunctionStore) GetInvocationTime(cold bool) ([]int64){
+func (fs *FunctionStore) GetInvocationTime(cold bool) []int64 {
 	fs.metricMu.RLock()
 	defer fs.metricMu.RUnlock()
 
@@ -266,6 +279,23 @@ func (fs *FunctionStore) GetInvocationTime(cold bool) ([]int64){
 	} else {
 		return fs.invocationTimesWarm
 	}
+}
+
+func (fs *FunctionStore) GetNetNS() (int64, string) {
+	fs.nsMu.Lock()
+	defer fs.nsMu.Unlock()
+	thisIP := fs.nextNSIP.To4().String()
+	i := fs.nextNSIP.To4()
+	v := uint(i[0])<<24 + uint(i[1])<<16 + uint(i[2])<<8 + uint(i[3])
+	v += 1
+	v3 := byte(v & 0xFF)
+	v2 := byte((v >> 8) & 0xFF)
+	v1 := byte((v >> 16) & 0xFF)
+	v0 := byte((v >> 24) & 0xFF)
+	fs.nextNSIP = net.IPv4(v0, v1, v2, v3)
+	thisNS := fs.nextNS
+	fs.nextNS += 1
+	return thisNS, thisIP
 }
 
 /* Utility functions */
