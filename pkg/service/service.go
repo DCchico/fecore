@@ -16,6 +16,8 @@ import (
 	"github.com/docker/cli/cli/config"
 	"github.com/docker/cli/cli/config/configfile"
 	"golang.org/x/sys/unix"
+
+	"github.gatech.edu/faasedge/fecore/pkg/timec"
 )
 
 // dockerConfigDir contains "config.json"
@@ -128,7 +130,8 @@ func getResolver(ctx context.Context, configFile *configfile.ConfigFile) (remote
 	return docker.NewResolver(opts), nil
 }
 
-func PrepareImage(ctx context.Context, client *containerd.Client, imageName, snapshotter string, pullAlways bool) (containerd.Image, error) {
+func PrepareImage(ctx context.Context, client *containerd.Client, imageName, requestID string, snapshotter string, pullAlways bool) (containerd.Image, error) {
+	defer timec.RecordDuration("(service.go) PrepareImage() <requestID="+requestID+">", time.Now())
 	var (
 		empty    containerd.Image
 		resolver remotes.Resolver
