@@ -9,7 +9,8 @@ import (
 	"os"
 	"os/exec"
 	"path"
-	"syscall"
+	"strconv"
+	"time"
 
 	"github.com/KarpelesLab/reflink"
 	"github.com/containerd/containerd"
@@ -20,8 +21,9 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/opencontainers/runtime-spec/specs-go"
 	"github.com/openfaas/faas-provider/types"
-	cninetwork "github.gatech.edu/faasedge/fecore/pkg/cninetwork"
 	"github.gatech.edu/faasedge/fecore/pkg/service"
+
+	"github.gatech.edu/faasedge/fecore/pkg/timec"
 )
 
 func MakeReplicaReaderHandler(client *containerd.Client, fs *FunctionStore) func(w http.ResponseWriter, r *http.Request) {
@@ -74,26 +76,26 @@ func MakeReplicaReaderHandler(client *containerd.Client, fs *FunctionStore) func
 	}
 }
 
-func createReplica(client *containerd.Client, cni gocni.CNI, fn *Function, setActive bool) (string, error) {
-
+func createReplica(client *containerd.Client, cni gocni.CNI, fs *FunctionStore, fn *Function, requestID string, setActive bool) (string, error) {
+	defer timec.RecordDuration("(replicas.go).createReplica <requestID="+requestID+">", time.Now())
 	ctx := namespaces.WithNamespace(context.Background(), fn.namespace)
 
 	if val, ok := fn.labels["module.wasm.image/variant"]; ok && (val == "compat-smart" || val == "compat") {
-		wasmName, wasmCmd, err := createWasmReplica(fn, setActive)
+		wasmName, ip, wasmCmd, err := createWasmReplica(fn, fs, requestID, setActive)
 		wasmPid := wasmCmd.Process.Pid
 		if err == nil {
 			/* Setup CNI for PID */
 			//cniResult, err := cninetwork.CreateWasmCNINetwork(ctx, cni, wasmName, wasmPid, fn.labels)
-			labels := map[string]string{}
-			result, err := cninetwork.CreateWasmCNINetwork(ctx, cni, wasmName, wasmPid, labels)
-			if err != nil {
-				log.Printf("[createReplica] Could not setup networking for WASM container '%s'", wasmName)
-				return "", err
-			}
-			log.Printf("IP for '%s' = %s", wasmName, result.Interfaces["eth1"].IPConfigs[0].IP)
-			// Store UUID,PID in fn
-			ip := result.Interfaces["eth1"].IPConfigs[0].IP.String()
-			wasmCmd.Process.Signal(syscall.SIGUSR1)
+			// labels := map[string]string{}
+			// result, err := cninetwork.CreateWasmCNINetwork(ctx, cni, wasmName, wasmPid, requestID, labels)
+			// if err != nil {
+			// 	log.Printf("[createReplica] Could not setup networking for WASM container '%s'", wasmName)
+			// 	return "", err
+			// }
+			// log.Printf("IP for '%s' = %s", wasmName, result.Interfaces["eth1"].IPConfigs[0].IP)
+			// // Store UUID,PID in fn
+			// ip := result.Interfaces["eth1"].IPConfigs[0].IP.String()
+			// wasmCmd.Process.Signal(syscall.SIGUSR1)
 			if setActive {
 				fn.activeReplicas[wasmName] = ip
 			} else {
@@ -104,12 +106,13 @@ func createReplica(client *containerd.Client, cni gocni.CNI, fn *Function, setAc
 		return wasmName, nil
 	}
 
+	// snapshotter := "overlay"
 	snapshotter := ""
 	if val, ok := os.LookupEnv("snapshotter"); ok {
 		snapshotter = val
 	}
 
-	image, err := service.PrepareImage(ctx, client, fn.image, snapshotter, false)
+	image, err := service.PrepareImage(ctx, client, fn.image, requestID, snapshotter, false)
 	if err != nil {
 		return "", fmt.Errorf("[createReplica] Unable to pull image %s, %w", fn.image, err)
 	}
@@ -158,6 +161,7 @@ func createReplica(client *containerd.Client, cni gocni.CNI, fn *Function, setAc
 	container, err := client.NewContainer(
 		ctx,
 		name,
+		requestID,
 		containerd.WithImage(image),
 		containerd.WithSnapshotter(snapshotter),
 		containerd.WithNewSnapshot(name+"-snapshot", image),
@@ -175,7 +179,7 @@ func createReplica(client *containerd.Client, cni gocni.CNI, fn *Function, setAc
 		return "", fmt.Errorf("[createReplica] Unable to create container '%s': %w", name, err)
 	}
 
-	ip, createTaskStatus := createTask(ctx, container, cni)
+	ip, createTaskStatus := createTask(ctx, container, requestID, cni)
 	if createTaskStatus != nil {
 		return "", fmt.Errorf("[createReplica] Unable to create task for container '%s': %w", name, createTaskStatus)
 	}
@@ -200,7 +204,8 @@ func createReplica(client *containerd.Client, cni gocni.CNI, fn *Function, setAc
 	return "", err
 }
 
-func setupWasmStorage(fn *Function, name string) error {
+func setupWasmStorage(fn *Function, name string, requestID string) error {
+	defer timec.RecordDuration("(replicas.go).setupWasmStorage <requestID="+requestID+">", time.Now())
 	// WASM_IMAGES_ROOT := "/mnt/faasedge/images"
 	image_path := fn.image
 	rootfs_path := image_path + "/replicas/" + name
@@ -226,34 +231,38 @@ func setupWasmStorage(fn *Function, name string) error {
 	return nil
 }
 
-func createWasmReplica(fn *Function, setActive bool) (string, *exec.Cmd, error) {
+func createWasmReplica(fn *Function, fs *FunctionStore, requestID string, setActive bool) (string, string, *exec.Cmd, error) {
+	defer timec.RecordDuration("(replicas.go).createWasmReplica <requestID="+requestID+">", time.Now())
 	// WASM_IMAGES_ROOT := "/mnt/faasedge/images"
 	/* Generate UUID */
-	name := fn.name + "-" + uuid.New().String()
+	replicaName := fn.name + "-" + uuid.New().String()
 
 	/* Create unique dir for replica and setup reflinks */
-	err := setupWasmStorage(fn, name)
+	err := setupWasmStorage(fn, replicaName, requestID)
 	if err != nil {
-		return "", nil, err
+		return "", "", nil, err
 	}
+	/* Get the next available network namespace */
+	netnsNum, IP := fs.GetNetNS()
 	/* Exec wasmedge to create container process, retrieve PID */
 	container_wasm_file := fn.image + "/" + "function.wasm"
-	container_dir_arg := ".:" + fn.image + "/replicas/" + name
-	cmd := exec.Command("/mnt/faasedge/runw", container_wasm_file, container_dir_arg)
+	container_dir_arg := ".:" + fn.image + "/replicas/" + replicaName
+	log.Printf("[createWasmReplica] Creating replica with command: /mnt/faasedge/runw %s %s %s", container_wasm_file, container_dir_arg, strconv.FormatInt(netnsNum, 10))
+	cmd := exec.Command("/mnt/faasedge/runw", container_wasm_file, container_dir_arg, strconv.FormatInt(netnsNum, 10))
 
 	// cmd.Env = append(cmd.Environ(), "WASMEDGE_PLUGIN_PATH=/wasmedge/")
 	// cmd.Env = append(cmd.Environ(), "LD_LIBRARY_PATH=\"/lib/:/wasmedge/\"")
 
-	cmd.SysProcAttr = &syscall.SysProcAttr{Unshareflags: syscall.CLONE_NEWNET}
-
 	err = cmd.Start()
 
 	if err == nil {
-		log.Printf("[createWasmReplica] Created WASM container '%s'", name)
+		log.Printf("[createWasmReplica] Created WASM container '%s' with IP '%s'", replicaName, IP)
 
-		return name, cmd, nil
+		return replicaName, IP, cmd, nil
 	}
 
-	log.Printf("[createWasmReplica] Error starting WASM container '%s'", name)
-	return "", nil, err
+	/* TODO: If error starting process, return netnsNum/IP back to pool as available */
+
+	log.Printf("[createWasmReplica] Error starting WASM container '%s'", replicaName)
+	return "", "", nil, err
 }
