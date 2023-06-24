@@ -59,7 +59,7 @@ func MakeDeleteHandler(client *containerd.Client, cni gocni.CNI, fs *FunctionSto
 		ctx := namespaces.WithNamespace(context.Background(), lookupNamespace)
 
 		// Remove each Function replica
-		fn, err := fs.GetDeployedFunction(name)
+		fn, err := fs.GetDeployedFunction(name, "Delete <"+name+">")
 		for rname := range fn.idleReplicas {
 			deleteReplica(ctx, client, fn, cni, rname)
 		}

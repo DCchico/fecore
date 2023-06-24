@@ -39,7 +39,7 @@ func (i *InvokeResolver) Resolve(functionName string, requestID string) (url.URL
 	/* TODO: Eventually we want to update GetFunction() to return a pointer to
 	 * the struct for actualFunctionName; for now, we'll access the
 	 * DeployedFunctions map directly */
-	function, er := i.fs.GetDeployedFunction(actualFunctionName)
+	function, er := i.fs.GetDeployedFunction(actualFunctionName, requestID)
 	if er != nil {
 		log.Printf("[Invoke] Error retrieving function '%s': %s", actualFunctionName, er)
 		return url.URL{}, false, er
@@ -51,9 +51,10 @@ func (i *InvokeResolver) Resolve(functionName string, requestID string) (url.URL
 	var coldStart bool
 	/* Get the next idle replica if there is at least 1 available (warm start);
 	 * otherwise create new replica (cold start) */
+	/* TODO: Potential race condition here: function.idleReplicas is read w/o mutex */
 	if len(function.idleReplicas) > 0 {
 		coldStart = false
-		replicaName, replicaIP, err = i.fs.GetIdleReplica(actualFunctionName)
+		replicaName, replicaIP, err = i.fs.GetIdleReplica(actualFunctionName, requestID)
 		if err != nil {
 			log.Printf("[Invoke] Error retrieving idle replica for Function '%s': %s", function.name, err)
 			return url.URL{}, false, err
@@ -71,8 +72,8 @@ func (i *InvokeResolver) Resolve(functionName string, requestID string) (url.URL
 			timec.RecordDuration("(invoke_resolver.go).Resolve.[CreateReplicaTime] <requestID="+requestID+">", startTime)
 			coldStartTime := time.Since(startTime)
 			replicaIP = function.activeReplicas[replicaName]
-			i.fs.AddActiveReplica(function.name, replicaName, replicaIP)
-			i.fs.RecordColdStartTime(coldStartTime)
+			i.fs.AddActiveReplica(function.name, replicaName, replicaIP, requestID)
+			i.fs.RecordColdStartTime(coldStartTime, requestID)
 			log.Printf("[Invoke] Using new replica '%s' @ %s for Function '%s'", replicaName, replicaIP, function.name)
 		}
 	}

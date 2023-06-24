@@ -190,7 +190,7 @@ func deploy(ctx context.Context, req types.FunctionDeployment, client *container
 	replicaName, createReplicaStatus := createReplica(client, cni, fs, fn, "Deploy", false)
 	if createReplicaStatus == nil {
 		coldStartTime := time.Since(startTime)
-		fs.RecordColdStartTime(coldStartTime)
+		fs.RecordColdStartTime(coldStartTime, "Deploy <"+fn.name+">")
 		log.Printf("[deploy] Created container '%s' for Function '%s'", replicaName, fn.name)
 	} else {
 		log.Printf("[deploy] Failed to create container for Function '%s'", fn.name)

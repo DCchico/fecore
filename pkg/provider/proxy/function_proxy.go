@@ -129,8 +129,7 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 		defer response.Body.Close()
 	}
 
-	log.Printf("[function_proxy] Invocation of '%s' (coldStart: %t) took %d ms with %d retires \n", functionName, coldStart, proxyElapsed.Milliseconds(),
-		connectionRetries)
+	log.Printf("[function_proxy] Invocation of '%s' (coldStart: %t) took %d ms with %d retries \n", functionName, coldStart, proxyElapsed.Milliseconds(), connectionRetries)
 	fs.RecordInvocationTime(proxyElapsed, coldStart)
 
 	ip = strings.Split(functionAddr.Host, ":")[0]

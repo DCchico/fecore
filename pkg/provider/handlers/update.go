@@ -56,7 +56,7 @@ func MakeUpdateHandler(client *containerd.Client, cni gocni.CNI, secretMountPath
 
 		namespaceSecretMountPath := getNamespaceSecretMountPath(secretMountPath, namespace)
 
-		function, err := fs.GetDeployedFunction(name);
+		function, err := fs.GetDeployedFunction(name, "UpdateHandler")
 		if err != nil {
 			msg := fmt.Sprintf("service %s not found", name)
 			log.Printf("[Update] %s\n", msg)
