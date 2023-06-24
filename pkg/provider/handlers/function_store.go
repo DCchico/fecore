@@ -14,6 +14,7 @@ import (
 	gocni "github.com/containerd/go-cni"
 	fecore "github.gatech.edu/faasedge/fecore/pkg"
 	"github.gatech.edu/faasedge/fecore/pkg/provider/storage"
+	"github.gatech.edu/faasedge/fecore/pkg/timec"
 )
 
 /*
@@ -130,7 +131,8 @@ func (fs *FunctionStore) GetDeployedFunctions() ([]Function, error) {
  * and returns pointer to that struct
  * TODO check namespace
  */
-func (fs *FunctionStore) GetDeployedFunction(name string) (fn Function, err error) {
+func (fs *FunctionStore) GetDeployedFunction(name string, requestID string) (fn Function, err error) {
+	defer timec.RecordDuration("(function_store.go) GetDeployedFunction() <requestID="+requestID+">", time.Now())
 	fs.mu.RLock()
 	defer fs.mu.RUnlock()
 	if fn, ok := fs.deployedFunctions[name]; ok {
@@ -190,7 +192,8 @@ func (fs *FunctionStore) RemoveDeployedFunction(name string) error {
 
 /* Gets the container name of an idle (warm) Function replica and sets the
  * container replica to Active */
-func (fs *FunctionStore) GetIdleReplica(fn string) (string, string, error) {
+func (fs *FunctionStore) GetIdleReplica(fn string, requestID string) (string, string, error) {
+	defer timec.RecordDuration("(function_store.go) GetIdleReplica() <requestID="+requestID+">", time.Now())
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
 
@@ -210,11 +213,12 @@ func (fs *FunctionStore) GetIdleReplica(fn string) (string, string, error) {
 }
 
 /* Adds new active replica */
-func (fs *FunctionStore) AddActiveReplica(fn string, cn string, ip string) error {
-	err := fs.storageManager.InsertContainer(storage.Container{Name: cn, ParentFunction: fn, Ip: ip})
-	if err != nil {
-		return err
-	}
+func (fs *FunctionStore) AddActiveReplica(fn string, cn string, ip string, requestID string) error {
+	defer timec.RecordDuration("(function_store.go) AddActiveReplica() <requestID="+requestID+">", time.Now())
+	// err := fs.storageManager.InsertContainer(storage.Container{Name: cn, ParentFunction: fn, Ip: ip})
+	// if err != nil {
+	// 	return err
+	// }
 	fs.mu.Lock()
 	fs.deployedFunctions[fn].activeReplicas[cn] = ip
 	fs.mu.Unlock()
@@ -245,11 +249,12 @@ func (fs *FunctionStore) UpdateReplicaStatusInactive(fn string, ip string) error
 	return nil
 }
 
-func (fs *FunctionStore) RecordColdStartTime(time time.Duration) {
+func (fs *FunctionStore) RecordColdStartTime(csTime time.Duration, requestID string) {
+	defer timec.RecordDuration("(function_store.go) RecordColdStartTime() <requestID="+requestID+">", time.Now())
 	fs.metricMu.Lock()
 	defer fs.metricMu.Unlock()
 
-	fs.coldStartTimes = append(fs.coldStartTimes, time.Milliseconds())
+	fs.coldStartTimes = append(fs.coldStartTimes, csTime.Milliseconds())
 }
 
 func (fs *FunctionStore) GetColdStartTimes() []int64 {
