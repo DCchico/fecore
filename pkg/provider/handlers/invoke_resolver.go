@@ -59,10 +59,10 @@ func (i *InvokeResolver) Resolve(functionName string, requestID string) (url.URL
 			log.Printf("[Invoke] Error retrieving idle replica for Function '%s': %s", function.name, err)
 			return url.URL{}, false, err
 		}
-		log.Printf("[Invoke] Using idle replica '%s' for Function '%s'", replicaName, function.name)
+		log.Printf("[Invoke] Using idle replica '%s' (%s) for Function '%s' <requestID=%s>", replicaName, replicaIP, function.name, requestID)
 	} else {
 		coldStart = true
-		log.Printf("[Invoke] Creating new replica for Function '%s'", function.name)
+		log.Printf("[Invoke] Creating new replica for Function '%s' <requestID=%s>", function.name, requestID)
 		startTime := time.Now()
 		replicaName, err := createReplica(i.client, i.cni, i.fs, &function, requestID, true)
 		if err != nil {
@@ -74,7 +74,7 @@ func (i *InvokeResolver) Resolve(functionName string, requestID string) (url.URL
 			replicaIP = function.activeReplicas[replicaName]
 			i.fs.AddActiveReplica(function.name, replicaName, replicaIP, requestID)
 			i.fs.RecordColdStartTime(coldStartTime, requestID)
-			log.Printf("[Invoke] Using new replica '%s' @ %s for Function '%s'", replicaName, replicaIP, function.name)
+			log.Printf("[Invoke] Using new replica '%s' (%s) for Function '%s' <requestID=%s>", replicaName, replicaIP, function.name, requestID)
 		}
 	}
 
