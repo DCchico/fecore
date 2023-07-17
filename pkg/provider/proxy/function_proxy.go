@@ -59,6 +59,8 @@ func NewHandlerFunc(config types.FaaSConfig, resolver *handlers.InvokeResolver, 
 
 // proxyRequest handles the actual resolution of and then request to the function service.
 func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient *http.Client, resolver *handlers.InvokeResolver, fs *handlers.FunctionStore) {
+	/* Begin function replica setup */
+	fnSetupStart := time.Now()
 	ctx := originalReq.Context()
 
 	pathVars := mux.Vars(originalReq)
@@ -93,7 +95,7 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 	var response *http.Response
 	maxRetries := 1000
 	connectionRetries := 0
-	totalConnectTime := 0
+	var totalConnectTime int64
 	sleepQuantum := 1
 
 	proxyStart := time.Now()
@@ -101,6 +103,12 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 
 	ip := strings.Split(functionAddr.Host, ":")[0]
 
+	fnSetupTime := time.Since(fnSetupStart).Milliseconds()
+	log.Printf("[function_proxy] fnSetupTime = %d", fnSetupTime)
+	/* End function replica setup */
+
+	fnExecStart := time.Now()
+	totalConnectTime = -1
 	for connectionRetries < maxRetries {
 		connStart = time.Now()
 		response, err = proxyClient.Do(proxyReq.WithContext(ctx))
@@ -110,20 +118,27 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 			connectionRetries += 1
 			time.Sleep(time.Duration(sleepQuantum) * time.Millisecond)
 		} else {
-			totalConnectTime := connStart.Sub(proxyStart).Milliseconds()
-			log.Printf("[function_proxy] Success connecting to function <requestID=%s, totalConnectTime=%d>", requestID, totalConnectTime)
 			break
 		}
 	}
+	totalConnectTime = connStart.Sub(proxyStart).Milliseconds()
+	fnExecTime := time.Since(fnExecStart).Milliseconds()
 
-	proxyElapsed := time.Since(proxyStart)
-	timec.RecordDuration("(function_proxy.go) proxyRequest() : [ProxyRequestTime] <requestID="+requestID+", coldStart="+strconv.FormatBool(coldStart)+", retries="+strconv.Itoa(connectionRetries)+", connectTime="+strconv.Itoa(totalConnectTime)+" ms>", proxyStart)
-
+	if connectionRetries == maxRetries {
+		log.Printf("[retryProxyRequest] Unable to contact function %s <requestID=%s> at %s: connection time exceeded\n", functionName, requestID, ip)
+		httputil.Errorf(w, http.StatusInternalServerError, "Connection time exceeded")
+		return
+	}
 	if err != nil || response.StatusCode != 200 {
-		log.Printf("[retryProxyRequest] Unable to contact function %s with status code %d and error : %s \n", functionName, response.StatusCode, err)
+		log.Printf("[retryProxyRequest] Unable to contact function %s at %s with status code %d and error : %s \n", functionName, ip, response.StatusCode, err)
 		httputil.Errorf(w, http.StatusInternalServerError, "Can't reach service for '%s'", functionName)
 		return
 	}
+
+	log.Printf("[function_proxy] Success connecting to function <requestID=%s, execTime=%d>", requestID, fnExecTime)
+
+	proxyElapsed := time.Since(proxyStart)
+	timec.RecordDuration("(function_proxy.go) proxyRequest() : [ProxyRequestTime] <requestID="+requestID+", coldStart="+strconv.FormatBool(coldStart)+", retries="+strconv.Itoa(connectionRetries)+", connectTime="+strconv.Itoa(int(totalConnectTime))+" ms>", proxyStart)
 
 	if response.Body != nil {
 		defer response.Body.Close()
@@ -131,9 +146,11 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 
 	log.Printf("[function_proxy] Invocation of '%s' (coldStart: %t) took %d ms with %d retries \n", functionName, coldStart, proxyElapsed.Milliseconds(), connectionRetries)
 	fs.RecordInvocationTime(proxyElapsed, coldStart)
+	log.Printf("[function_proxy] CALLING UpdateFunctionStats(%s, %d, %d)", functionName, fnSetupTime, fnExecTime)
+	fs.UpdateFunctionStats(functionName, fnSetupTime, fnExecTime)
 
 	ip = strings.Split(functionAddr.Host, ":")[0]
-	err = fs.UpdateReplicaStatusInactive(functionName, ip)
+	err = fs.UpdateReplicaStatusInactive(functionName, ip, requestID)
 	if err != nil {
 		log.Printf("[function_proxy] Unable to update function replica status '%s': %s\n", proxyReq.URL.String(), err.Error())
 		httputil.Errorf(w, http.StatusInternalServerError, "Can't reach service for '%s'", functionName)

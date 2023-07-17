@@ -103,6 +103,11 @@ func makeProviderCmd() *cobra.Command {
 			<-gocron.Start()
 		}()
 
+		/* Drain stats channel in the background */
+		go func() {
+			fs.ProcessFunctionStats()
+		}()
+
 		invokeResolver := handlers.NewInvokeResolver(client, cni, fs)
 
 		baseUserSecretsPath := path.Join(wd, "secrets")

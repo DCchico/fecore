@@ -24,16 +24,14 @@ import (
 
 /* In-memory map for keeping track of functions that have been created */
 type FunctionStore struct {
-	mu                sync.RWMutex // Added a rw mutex and things like reading the whole map require a global map anyways, TODO check if there are other strategies
 	deployedFunctions map[string]*Function
+	functionStats     map[string]*FunctionStats
 	storageManager    storage.StorageManager
 
-	metricMu            sync.RWMutex
 	coldStartTimes      []int64
 	invocationTimesCold []int64 // cold and warm distinguish how many retries
 	invocationTimesWarm []int64
 
-	ipamMu sync.RWMutex
 	nextIP net.IP
 	//ipconfigs map[string]string
 	ipconfigs sync.Map
@@ -44,18 +42,45 @@ type FunctionStore struct {
 	netnsList []int64
 	nextNSIP  net.IP
 	/* End netns test */
+
+	statsChan chan FunctionStat
+
+	/* Begin mutexes */
+	mu       sync.RWMutex // Added a rw mutex and things like reading the whole map require a global map anyways, TODO check if there are other strategies
+	metricMu sync.RWMutex
+	ipamMu   sync.RWMutex
+	dfMu     sync.RWMutex
+	/* End mutexes */
+}
+
+type FunctionStats struct {
+	startupTimes [100]int64
+	execTimes    [100]int64
+
+	startupTimesPos int
+	execTimesPos    int
+}
+
+type FunctionStat struct {
+	fn          string
+	startupTime int64
+	execTime    int64
 }
 
 func InitFunctionStore(storageManager storage.StorageManager) (*FunctionStore, error) {
 	fs := FunctionStore{
-		mu:                sync.RWMutex{},
-		deployedFunctions: make(map[string]*Function),
-		storageManager:    storageManager,
-		metricMu:          sync.RWMutex{},
-		ipamMu:            sync.RWMutex{},
-		nsMu:              sync.RWMutex{},
+		/* Init mutexes */
+		mu:       sync.RWMutex{},
+		metricMu: sync.RWMutex{},
+		ipamMu:   sync.RWMutex{},
+		nsMu:     sync.RWMutex{},
+		dfMu:     sync.RWMutex{},
 		//ipconfigs:         make(map[string]string),
-		ipconfigs: sync.Map{},
+		deployedFunctions: make(map[string]*Function),
+		functionStats:     make(map[string]*FunctionStats),
+		storageManager:    storageManager,
+		ipconfigs:         sync.Map{},
+		statsChan:         make(chan FunctionStat, 100),
 	}
 
 	sFns, err := storageManager.GetAllFunctions()
@@ -93,8 +118,8 @@ func InitFunctionStore(storageManager storage.StorageManager) (*FunctionStore, e
  * Cleanup function replicas that are not being used
  */
 func (fs *FunctionStore) CleanupDaemon(client *containerd.Client, cni gocni.CNI) {
-	fs.mu.Lock()
-	defer fs.mu.Unlock()
+	fs.dfMu.Lock()
+	defer fs.dfMu.Unlock()
 
 	log.Println("[CleanupDaemon] RUNNING")
 
@@ -118,8 +143,8 @@ func (fs *FunctionStore) CleanupDaemon(client *containerd.Client, cni gocni.CNI)
  * and returns pointer to that struct.
  */
 func (fs *FunctionStore) GetDeployedFunctions() ([]Function, error) {
-	fs.mu.RLock()
-	defer fs.mu.RUnlock()
+	fs.dfMu.RLock()
+	defer fs.dfMu.RUnlock()
 	fns := make([]Function, 0)
 	for _, value := range fs.deployedFunctions {
 		fns = append(fns, *value)
@@ -133,8 +158,8 @@ func (fs *FunctionStore) GetDeployedFunctions() ([]Function, error) {
  */
 func (fs *FunctionStore) GetDeployedFunction(name string, requestID string) (fn Function, err error) {
 	defer timec.RecordDuration("(function_store.go) GetDeployedFunction() <requestID="+requestID+">", time.Now())
-	fs.mu.RLock()
-	defer fs.mu.RUnlock()
+	fs.dfMu.RLock()
+	defer fs.dfMu.RUnlock()
 	if fn, ok := fs.deployedFunctions[name]; ok {
 		return *fn, nil
 	}
@@ -153,9 +178,17 @@ func (fs *FunctionStore) AddDeployedFunction(fn *Function) error {
 			return err
 		}
 	}
-	fs.mu.Lock()
+	fs.dfMu.Lock()
 	fs.deployedFunctions[fn.name] = fn
-	fs.mu.Unlock()
+	fs.dfMu.Unlock()
+
+	/* Begin init stats for this fn */
+	fnStats := FunctionStats{}
+	fnStats.startupTimesPos = 0
+	fnStats.execTimesPos = 0
+	fs.functionStats[fn.name] = &fnStats
+	/* End init stats for this fn */
+
 	log.Printf("[addDeployedFunction] Added deployed function '%s' in namespace '%s'", fn.name, fn.namespace)
 	return nil
 }
@@ -168,9 +201,9 @@ func (fs *FunctionStore) UpdateDeployedFunction(fn *Function) error {
 
 /* Remove function from store and db */
 func (fs *FunctionStore) RemoveDeployedFunction(name string) error {
-	fs.mu.RLock()
+	fs.dfMu.RLock()
 	fn := fs.deployedFunctions[name]
-	fs.mu.RUnlock()
+	fs.dfMu.RUnlock()
 
 	err := fs.storageManager.DeleteFunction(name)
 	if err != nil {
@@ -180,8 +213,8 @@ func (fs *FunctionStore) RemoveDeployedFunction(name string) error {
 		fs.storageManager.DeleteContainer(c.Name)
 	}
 
-	fs.mu.Lock()
-	defer fs.mu.Unlock()
+	fs.dfMu.Lock()
+	defer fs.dfMu.Unlock()
 	if _, ok := fs.deployedFunctions[name]; ok {
 		delete(fs.deployedFunctions, name)
 		log.Printf("[removeDeployedFunction] Removed deployed function '%s'", name)
@@ -194,8 +227,8 @@ func (fs *FunctionStore) RemoveDeployedFunction(name string) error {
  * container replica to Active */
 func (fs *FunctionStore) GetIdleReplica(fn string, requestID string) (string, string, error) {
 	defer timec.RecordDuration("(function_store.go) GetIdleReplica() <requestID="+requestID+">", time.Now())
-	fs.mu.Lock()
-	defer fs.mu.Unlock()
+	fs.dfMu.Lock()
+	defer fs.dfMu.Unlock()
 
 	var name string
 	var ip string
@@ -219,9 +252,9 @@ func (fs *FunctionStore) AddActiveReplica(fn string, cn string, ip string, reque
 	// if err != nil {
 	// 	return err
 	// }
-	fs.mu.Lock()
+	fs.dfMu.Lock()
 	fs.deployedFunctions[fn].activeReplicas[cn] = ip
-	fs.mu.Unlock()
+	fs.dfMu.Unlock()
 
 	return nil
 }
@@ -229,9 +262,10 @@ func (fs *FunctionStore) AddActiveReplica(fn string, cn string, ip string, reque
 /* Change container from active to inactive
  * Note: lookup by ip and container name is not avaiable in resolver
  */
-func (fs *FunctionStore) UpdateReplicaStatusInactive(fn string, ip string) error {
-	fs.mu.Lock()
-	defer fs.mu.Unlock()
+func (fs *FunctionStore) UpdateReplicaStatusInactive(fn string, ip string, requestID string) error {
+	defer timec.RecordDuration("(function_store.go) UpdateReplicaStatusInactive() Returning container w/ IP "+ip+" to inactive pool <requestID="+requestID+">", time.Now())
+	fs.dfMu.Lock()
+	defer fs.dfMu.Unlock()
 
 	cn := ""
 	for c, cIp := range fs.deployedFunctions[fn].activeReplicas {
@@ -301,6 +335,31 @@ func (fs *FunctionStore) GetNetNS() (int64, string) {
 	thisNS := fs.nextNS
 	fs.nextNS += 1
 	return thisNS, thisIP
+}
+
+func (fs *FunctionStore) UpdateFunctionStats(fn string, startupTime int64, execTime int64) {
+	log.Printf("[UpdateFunctionStats()] Got entry: fn=%s, startupTime=%d, execTime=%d", fn, startupTime, execTime)
+	fs.statsChan <- FunctionStat{fn, startupTime, execTime}
+}
+
+func (fs *FunctionStore) ProcessFunctionStats() {
+	/* Use circular buffer for stats
+	 * Based on idea from:
+	 * https://stackoverflow.com/questions/55598220/efficiently-keeping-a-collection-of-the-last-n-pushed-items */
+	MAX_ENTRIES := 100
+	for {
+		select {
+		case stat := <-fs.statsChan:
+			fn := stat.fn
+			startupTimesPos := fs.functionStats[fn].startupTimesPos
+			execTimesPos := fs.functionStats[fn].execTimesPos
+			fs.functionStats[fn].startupTimes[startupTimesPos] = stat.startupTime
+			fs.functionStats[fn].execTimes[execTimesPos] = stat.execTime
+			fs.functionStats[fn].startupTimesPos = (startupTimesPos + 1) % MAX_ENTRIES
+			fs.functionStats[fn].execTimesPos = (execTimesPos + 1) % MAX_ENTRIES
+			log.Printf("[ProcessFunctionStats()] Added entry #%d: fn=%s, startupTime=%d, execTime=%d", startupTimesPos, fn, fs.functionStats[fn].startupTimes[startupTimesPos], fs.functionStats[fn].execTimes[execTimesPos])
+		}
+	}
 }
 
 /* Utility functions */

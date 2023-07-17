@@ -2,6 +2,11 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
+	"log"
+	"os"
+	"time"
+
 	// "log"
 	"net/http"
 
@@ -34,6 +39,8 @@ func MakeMetricsHandler(fs *FunctionStore) http.HandlerFunc {
 			timec.ClearDurationLog()
 		case "write":
 			timec.WriteDurationLog()
+		case "metrics":
+			WriteMetricsLog(fs)
 		}
 
 		timec.WriteDurationLog()
@@ -47,5 +54,22 @@ func MakeMetricsHandler(fs *FunctionStore) http.HandlerFunc {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		w.Write(jsonOut)
+	}
+}
+
+func WriteMetricsLog(fs *FunctionStore) {
+	filename := fmt.Sprintf("/mnt/faasedge/logs/metrics-%d.log", time.Now().UnixMilli())
+	f, err := os.OpenFile(filename, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
+	if err != nil {
+		log.Fatalf("Error opening log file: %v", err)
+	}
+	defer f.Close()
+	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
+	log.SetOutput(f)
+	for fname, fstat := range fs.functionStats {
+		for i := 0; i < fstat.startupTimesPos; i++ {
+			log.Printf("%s, %d, %d\n", fname, fstat.startupTimes[i], fstat.execTimes[i])
+		}
+		log.Printf("---\n")
 	}
 }

@@ -70,7 +70,7 @@ func Remove(ctx context.Context, client *containerd.Client, name string) error {
 // Adapted from Stellar - https://github.com/stellar
 func killTask(ctx context.Context, task containerd.Task) error {
 
-	killTimeout := 30 * time.Second
+	//killTimeout := 30 * time.Second
 
 	wg := &sync.WaitGroup{}
 	wg.Add(1)
@@ -85,7 +85,10 @@ func killTask(ctx context.Context, task containerd.Task) error {
 				return
 			}
 
-			if err := task.Kill(ctx, unix.SIGTERM, containerd.WithKillAll); err != nil {
+			// if err := task.Kill(ctx, unix.SIGTERM, containerd.WithKillAll); err != nil {
+			/* SIGTERM has been buggy, so we'll force kill for now; need to investigate further
+			 * and kill gracefully in the future */
+			if err := task.Kill(ctx, unix.SIGKILL, containerd.WithKillAll); err != nil {
 				log.Printf("error killing container task: %s", err)
 			}
 
@@ -93,11 +96,11 @@ func killTask(ctx context.Context, task containerd.Task) error {
 			case <-wait:
 				task.Delete(ctx)
 				return
-			case <-time.After(killTimeout):
-				if err := task.Kill(ctx, unix.SIGKILL, containerd.WithKillAll); err != nil {
-					log.Printf("error force killing container task: %s", err)
-				}
-				return
+				// case <-time.After(killTimeout):
+				// 	if err := task.Kill(ctx, unix.SIGKILL, containerd.WithKillAll); err != nil {
+				// 		log.Printf("error force killing container task: %s", err)
+				// 	}
+				// 	return
 			}
 		}
 	}()
