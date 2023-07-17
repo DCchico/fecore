@@ -70,3 +70,7 @@ test-e2e:
 verify-compose:
 	@echo Verifying docker-compose.yaml images in remote registries && \
 	arkade chart verify --verbose=$(VERBOSE) -f ./docker-compose.yaml
+
+ach:
+	go build && \
+	sudo cp fecore /usr/local/bin/fecore
