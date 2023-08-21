@@ -1,3 +1,8 @@
+## Nodejs Thumbnailer
+
+```
+npm start
+```
 
 ## Code Reference:
 - https://github.com/alinebastos/simple-nodejs-server
