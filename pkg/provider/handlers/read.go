@@ -43,7 +43,7 @@ func MakeReadHandler(client *containerd.Client, fs *FunctionStore) func(w http.R
 			status := types.FunctionStatus{
 				Name:        fn.name,
 				Image:       fn.image,
-				Replicas:    uint64(fn.replicas),
+				Replicas:    uint64(fn.replicas), // TODO: update replicas count
 				Namespace:   fn.namespace,
 				Labels:      labels,
 				Annotations: annotations,

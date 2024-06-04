@@ -25,6 +25,7 @@ import (
 	"github.com/opencontainers/runtime-spec/specs-go"
 	"github.com/openfaas/faas-provider/types"
 	"github.com/pkg/errors"
+	fecore "github.gatech.edu/faasedge/fecore/pkg"
 	cninetwork "github.gatech.edu/faasedge/fecore/pkg/cninetwork"
 	"github.gatech.edu/faasedge/fecore/pkg/service"
 	"github.gatech.edu/faasedge/fecore/pkg/timec"
@@ -90,6 +91,7 @@ func MakeDeployHandler(client *containerd.Client, cni gocni.CNI, secretMountPath
 		fn.activeReplicas = make(map[string]string)
 		fn.idleReplicas = make(map[string]string)
 		fn.idleReplicasTs = make(map[string]time.Time)
+		fn.UserToFunctionReplica = make(map[string]map[string]fecore.StickinessRecord)
 
 		deployErr := deploy(ctx, req, client, cni, namespaceSecretMountPath, alwaysPull, &fn, fs)
 		if deployErr != nil {

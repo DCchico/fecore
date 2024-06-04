@@ -100,6 +100,8 @@ func InitFunctionStore(storageManager storage.StorageManager) (*FunctionStore, e
 			fn.idleReplicas[c.Name] = c.Ip
 			fn.idleReplicasTs[c.Name] = time.Now()
 		}
+		// State management
+		fn.UserToFunctionReplica = make(map[string]map[string]fecore.StickinessRecord)
 		fs.deployedFunctions[fn.name] = &fn
 	}
 	// log.Println(fs.deployedFunctions)
@@ -115,7 +117,7 @@ func InitFunctionStore(storageManager storage.StorageManager) (*FunctionStore, e
 }
 
 /**
- * Cleanup function replicas that are not being used
+ * Cleanup function replicas that are not being used for 100 secs
  */
 func (fs *FunctionStore) CleanupDaemon(client *containerd.Client, cni gocni.CNI) {
 	fs.dfMu.Lock()
@@ -134,6 +136,18 @@ func (fs *FunctionStore) CleanupDaemon(client *containerd.Client, cni gocni.CNI)
 				delete(fs.deployedFunctions[name].idleReplicas, cn)
 				delete(fs.deployedFunctions[name].idleReplicasTs, cn)
 				deleteReplica(ctx, client, *fs.deployedFunctions[name], cni, cn)
+				// State management
+				// Also delete the association in UserToFunctionReplica map.
+				// Iterate over all users and remove this replica.
+				for userID, replicas := range fn.UserToFunctionReplica {
+					if _, exists := replicas[cn]; exists {
+						delete(replicas, cn)
+						if len(replicas) == 0 {
+							// Optionally clean up if no more replicas are associated with the user.
+							delete(fn.UserToFunctionReplica, userID)
+						}
+					}
+				}
 			}
 		}
 	}
@@ -422,4 +436,35 @@ func getContainers(f *Function) []storage.Container {
 		cns = append(cns, storage.Container{Name: cname, ParentFunction: f.name, Ip: ip})
 	}
 	return cns
+}
+
+// State management: mark the bitmap given function, userID and replicaID
+func (fs *FunctionStore) MarkUserToReplica(functionName string, userID string, replicaName string, stickiness fecore.StickinessRecord) error {
+	fs.dfMu.Lock()
+	defer fs.dfMu.Unlock()
+
+	// Check if the function exists
+	fn, exists := fs.deployedFunctions[functionName]
+	if !exists {
+		return fmt.Errorf("[MarkUserToReplica] function %s not found", functionName)
+	}
+
+	// Check if the replica exists
+	_, replicaExists := fn.idleReplicas[replicaName]
+	if !replicaExists {
+		_, replicaExists = fn.activeReplicas[replicaName]
+		if !replicaExists {
+			return fmt.Errorf("[MarkUserToReplica] container replica %s not found for function %s", replicaName, functionName)
+		}
+	}
+
+	// Ensure the nested map for the user exists
+	if fn.UserToFunctionReplica[userID] == nil {
+		fn.UserToFunctionReplica[userID] = make(map[string]fecore.StickinessRecord)
+	}
+
+	// Mark or update the stickiness record
+	fn.UserToFunctionReplica[userID][replicaName] = stickiness // Example usage, assuming you have defined levels of stickiness
+
+	return nil
 }

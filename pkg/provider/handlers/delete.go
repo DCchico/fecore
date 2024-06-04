@@ -3,7 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
-	"io/ioutil"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -28,7 +28,7 @@ func MakeDeleteHandler(client *containerd.Client, cni gocni.CNI, fs *FunctionSto
 
 		defer r.Body.Close()
 
-		body, _ := ioutil.ReadAll(r.Body)
+		body, _ := io.ReadAll(r.Body)
 		log.Printf("[Delete] request: %s\n", string(body))
 
 		req := requests.DeleteFunctionRequest{}

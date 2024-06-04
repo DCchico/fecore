@@ -32,10 +32,12 @@ https://wasmedge.org/book/en/use_cases/kubernetes/container/crun.html
 
 https://github.com/openfaas/faasd/blob/master/docs/DEV.md#get-containerd
 
-### Fecore
+### Fecore ###
 
 ```
-sudo ./start.sh
+Run "go build" in /fecore main folder
+sudo cp fecore /usr/local/bin/ -f
+# If you deploy Fecore as a system service, please disable and stop after use, as we are in testing stage.
 ```
 
 
@@ -64,6 +66,11 @@ faas-cli deploy nodeinfo
 Invoke the function
 ```
 curl http://10.62.0.1:8081/function/nodeinfo
+
+
+curl http://10.62.0.60:8081/function/nodeinfo
+
+
 ```
 
 Delete the function

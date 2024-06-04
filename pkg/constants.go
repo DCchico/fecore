@@ -14,3 +14,12 @@ const (
 
 	defaultSnapshotter = "overlayfs"
 )
+
+// State management: stickiness consts
+type StickinessRecord int
+
+const (
+	NoStickiness StickinessRecord = iota
+	SomeStickiness
+	StrongStickiness
+)

@@ -62,6 +62,13 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 	/* Begin function replica setup */
 	fnSetupStart := time.Now()
 	ctx := originalReq.Context()
+	// State management: get userID
+	userID := originalReq.Header.Get("UserID")
+	if userID == "" {
+		userID = "-1"
+		// http.Error(w, "UserID is required", http.StatusBadRequest)
+		// return
+	}
 
 	pathVars := mux.Vars(originalReq)
 	functionName := pathVars["name"]
@@ -72,7 +79,7 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 		return
 	}
 
-	functionAddr, coldStart, resolveErr := resolver.Resolve(functionName, requestID)
+	functionAddr, coldStart, resolveErr := resolver.Resolve(functionName, requestID, userID)
 	if resolveErr != nil {
 		// TODO: Should record the 404/not found error in Prometheus.
 		log.Printf("resolver error: no endpoints for %s: %s\n", functionName, resolveErr.Error())
@@ -104,7 +111,7 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 	ip := strings.Split(functionAddr.Host, ":")[0]
 
 	fnSetupTime := time.Since(fnSetupStart).Milliseconds()
-	log.Printf("[function_proxy] fnSetupTime = %d", fnSetupTime)
+	log.Printf("[function_proxy] userID = %s, fnSetupTime = %d", userID, fnSetupTime)
 	/* End function replica setup */
 
 	fnExecStart := time.Now()

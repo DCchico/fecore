@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
@@ -61,14 +60,14 @@ func makeProviderCmd() *cobra.Command {
 			return err
 		}
 
-		writeHostsErr := ioutil.WriteFile(path.Join(wd, "hosts"),
+		writeHostsErr := os.WriteFile(path.Join(wd, "hosts"),
 			[]byte(`127.0.0.1	localhost`), workingDirectoryPermission)
 
 		if writeHostsErr != nil {
 			return fmt.Errorf("cannot write hosts file: %s", writeHostsErr)
 		}
 
-		writeResolvErr := ioutil.WriteFile(path.Join(wd, "resolv.conf"),
+		writeResolvErr := os.WriteFile(path.Join(wd, "resolv.conf"),
 			[]byte(`nameserver 8.8.8.8`), workingDirectoryPermission)
 
 		if writeResolvErr != nil {
@@ -97,6 +96,9 @@ func makeProviderCmd() *cobra.Command {
 		}
 
 		fs, err := handlers.InitFunctionStore(storageManager)
+		if err != nil {
+			return err
+		}
 
 		go func() {
 			gocron.Every(3600).Second().Do(fs.CleanupDaemon, client, cni) // TODO 200 sec hardcoded
@@ -155,7 +157,7 @@ func moveSecretsToDefaultNamespaceSecrets(baseSecretPath string, defaultNamespac
 		return err
 	}
 
-	files, err := ioutil.ReadDir(baseSecretPath)
+	files, err := os.ReadDir(baseSecretPath)
 	if err != nil {
 		return err
 	}
