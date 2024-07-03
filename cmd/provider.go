@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"net/http"
 	"os"
 	"path"
 
@@ -127,7 +126,7 @@ func makeProviderCmd() *cobra.Command {
 			ReplicaReader:        handlers.MakeReplicaReaderHandler(client, fs),
 			ReplicaUpdater:       handlers.MakeReplicaUpdateHandler(client, cni),
 			UpdateHandler:        handlers.MakeUpdateHandler(client, cni, baseUserSecretsPath, alwaysPull, fs),
-			HealthHandler:        func(w http.ResponseWriter, r *http.Request) {},
+			HealthHandler:        handlers.MakeHealthCheckHandler(client, cni, fs),
 			InfoHandler:          handlers.MakeInfoHandler(Version, GitCommit),
 			ListNamespaceHandler: handlers.MakeNamespacesLister(client),
 			SecretHandler:        handlers.MakeSecretHandler(client.NamespaceService(), baseUserSecretsPath),

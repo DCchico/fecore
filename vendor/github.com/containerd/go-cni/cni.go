@@ -22,14 +22,12 @@ import (
 	"os"
 	"strings"
 	"sync"
-	"time"
 
 	cnilibrary "github.com/containernetworking/cni/libcni"
 	"github.com/containernetworking/cni/pkg/invoke"
 	"github.com/containernetworking/cni/pkg/types"
 	types100 "github.com/containernetworking/cni/pkg/types/100"
 	"github.com/containernetworking/cni/pkg/version"
-	"github.gatech.edu/faasedge/fecore/pkg/timec"
 )
 
 type CNI interface {
@@ -108,7 +106,6 @@ func defaultCNIConfig() *libcni {
 
 // New creates a new libcni instance.
 func New(config ...Opt) (CNI, error) {
-	defer timec.RecordDuration("(go-cni/cni.go) New()", time.Now())
 	cni := defaultCNIConfig()
 	var err error
 	for _, c := range config {
@@ -121,7 +118,6 @@ func New(config ...Opt) (CNI, error) {
 
 // Load loads the latest config from cni config files.
 func (c *libcni) Load(opts ...Opt) error {
-	defer timec.RecordDuration("(go-cni/cni.go) Load()", time.Now())
 	var err error
 	c.Lock()
 	defer c.Unlock()
@@ -139,7 +135,6 @@ func (c *libcni) Load(opts ...Opt) error {
 
 // Status returns the status of CNI initialization.
 func (c *libcni) Status() error {
-	defer timec.RecordDuration("(go-cni/cni.go) Status()", time.Now())
 	c.RLock()
 	defer c.RUnlock()
 	if len(c.networks) < c.networkCount {
@@ -151,7 +146,6 @@ func (c *libcni) Status() error {
 // Networks returns all the configured networks.
 // NOTE: Caller MUST NOT modify anything in the returned array.
 func (c *libcni) Networks() []*Network {
-	defer timec.RecordDuration("(go-cni/cni.go) Networks()", time.Now())
 	c.RLock()
 	defer c.RUnlock()
 	return append([]*Network{}, c.networks...)
@@ -159,7 +153,6 @@ func (c *libcni) Networks() []*Network {
 
 // Setup setups the network in the namespace and returns a Result
 func (c *libcni) Setup(ctx context.Context, id string, path string, opts ...NamespaceOpts) (*Result, error) {
-	defer timec.RecordDuration("(go-cni/cni.go) Setup() <id="+id+">", time.Now())
 	if err := c.Status(); err != nil {
 		return nil, err
 	}
@@ -176,7 +169,6 @@ func (c *libcni) Setup(ctx context.Context, id string, path string, opts ...Name
 
 // SetupSerially setups the network in the namespace and returns a Result
 func (c *libcni) SetupSerially(ctx context.Context, id string, path string, opts ...NamespaceOpts) (*Result, error) {
-	defer timec.RecordDuration("(go-cni/cni.go) SetupSerially() <id="+id+">", time.Now())
 	if err := c.Status(); err != nil {
 		return nil, err
 	}
@@ -192,7 +184,6 @@ func (c *libcni) SetupSerially(ctx context.Context, id string, path string, opts
 }
 
 func (c *libcni) attachNetworksSerially(ctx context.Context, ns *Namespace) ([]*types100.Result, error) {
-	defer timec.RecordDuration("(go-cni/cni.go) attachNetworksSerially()", time.Now())
 	var results []*types100.Result
 	for _, network := range c.Networks() {
 		r, err := network.Attach(ctx, ns)
@@ -211,14 +202,12 @@ type asynchAttachResult struct {
 }
 
 func asynchAttach(ctx context.Context, index int, n *Network, ns *Namespace, wg *sync.WaitGroup, rc chan asynchAttachResult) {
-	defer timec.RecordDuration("(go-cni/cni.go) asynchAttach()", time.Now())
 	defer wg.Done()
 	r, err := n.Attach(ctx, ns)
 	rc <- asynchAttachResult{index: index, res: r, err: err}
 }
 
 func (c *libcni) attachNetworks(ctx context.Context, ns *Namespace) ([]*types100.Result, error) {
-	defer timec.RecordDuration("(go-cni/cni.go) attachNetworks()", time.Now())
 	var wg sync.WaitGroup
 	var firstError error
 	results := make([]*types100.Result, len(c.Networks()))
@@ -243,7 +232,6 @@ func (c *libcni) attachNetworks(ctx context.Context, ns *Namespace) ([]*types100
 
 // Remove removes the network config from the namespace
 func (c *libcni) Remove(ctx context.Context, id string, path string, opts ...NamespaceOpts) error {
-	defer timec.RecordDuration("(go-cni/cni.go) Remove() <id="+id+">", time.Now())
 	if err := c.Status(); err != nil {
 		return err
 	}
@@ -272,7 +260,6 @@ func (c *libcni) Remove(ctx context.Context, id string, path string, opts ...Nam
 
 // Check checks if the network is still in desired state
 func (c *libcni) Check(ctx context.Context, id string, path string, opts ...NamespaceOpts) error {
-	defer timec.RecordDuration("(go-cni/cni.go) Check() <id="+id+">", time.Now())
 	if err := c.Status(); err != nil {
 		return err
 	}
@@ -292,7 +279,6 @@ func (c *libcni) Check(ctx context.Context, id string, path string, opts ...Name
 
 // GetConfig returns a copy of the CNI plugin configurations as parsed by CNI
 func (c *libcni) GetConfig() *ConfigResult {
-	defer timec.RecordDuration("(go-cni/cni.go) GetConfig()", time.Now())
 	c.RLock()
 	defer c.RUnlock()
 	r := &ConfigResult{
