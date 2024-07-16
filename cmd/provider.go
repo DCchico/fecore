@@ -135,6 +135,7 @@ func makeProviderCmd() *cobra.Command {
 
 		bootstrap.Router().HandleFunc("/timec", handlers.MakeMetricsHandler(fs))
 		bootstrap.Router().HandleFunc("/ipam", handlers.MakeIPAMHandler(fs))
+		bootstrap.Router().HandleFunc("/workflow", handlers.MakeWorkflowHandler())
 
 		log.Printf("Listening on TCP port: %d\n", *config.TCPPort)
 		bootstrap.Serve(&bootstrapHandlers, config)

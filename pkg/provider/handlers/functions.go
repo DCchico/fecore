@@ -37,7 +37,7 @@ type Function struct {
 	/* State management: stickiness between userID and functionReplica
 	N to N mapping implemented in a bitmap -> 2D map array
 	*/
-	UserToFunctionReplica map[string]map[string]fecore.StickinessRecord
+	// UserToFunctionReplica map[string]map[string]fecore.StickinessRecord
 }
 
 // // ListFunctions returns a map of all functions with running tasks on namespace

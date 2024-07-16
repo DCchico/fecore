@@ -101,7 +101,7 @@ func InitFunctionStore(storageManager storage.StorageManager) (*FunctionStore, e
 			fn.idleReplicasTs[c.Name] = time.Now()
 		}
 		// State management
-		fn.UserToFunctionReplica = make(map[string]map[string]fecore.StickinessRecord)
+		// fn.UserToFunctionReplica = make(map[string]map[string]fecore.StickinessRecord)
 		fs.deployedFunctions[fn.name] = &fn
 	}
 	// log.Println(fs.deployedFunctions)
@@ -139,15 +139,15 @@ func (fs *FunctionStore) CleanupDaemon(client *containerd.Client, cni gocni.CNI)
 				// State management
 				// Also delete the association in UserToFunctionReplica map.
 				// Iterate over all users and remove this replica.
-				for userID, replicas := range fn.UserToFunctionReplica {
-					if _, exists := replicas[cn]; exists {
-						delete(replicas, cn)
-						if len(replicas) == 0 {
-							// Optionally clean up if no more replicas are associated with the user.
-							delete(fn.UserToFunctionReplica, userID)
-						}
-					}
-				}
+				// for userID, replicas := range fn.UserToFunctionReplica {
+				// 	if _, exists := replicas[cn]; exists {
+				// 		delete(replicas, cn)
+				// 		if len(replicas) == 0 {
+				// 			// Optionally clean up if no more replicas are associated with the user.
+				// 			delete(fn.UserToFunctionReplica, userID)
+				// 		}
+				// 	}
+				// }
 			}
 		}
 	}
@@ -458,13 +458,13 @@ func (fs *FunctionStore) MarkUserToReplica(functionName string, userID string, r
 		}
 	}
 
-	// Ensure the nested map for the user exists
-	if fn.UserToFunctionReplica[userID] == nil {
-		fn.UserToFunctionReplica[userID] = make(map[string]fecore.StickinessRecord)
-	}
+	// // Ensure the nested map for the user exists
+	// if fn.UserToFunctionReplica[userID] == nil {
+	// 	fn.UserToFunctionReplica[userID] = make(map[string]fecore.StickinessRecord)
+	// }
 
-	// Mark or update the stickiness record
-	fn.UserToFunctionReplica[userID][replicaName] = stickiness // Example usage, assuming you have defined levels of stickiness
+	// // Mark or update the stickiness record
+	// fn.UserToFunctionReplica[userID][replicaName] = stickiness // Example usage, assuming you have defined levels of stickiness
 
 	return nil
 }
