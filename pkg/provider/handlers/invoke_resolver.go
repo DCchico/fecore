@@ -25,7 +25,7 @@ func NewInvokeResolver(client *containerd.Client, cni gocni.CNI, fs *FunctionSto
 	return &InvokeResolver{client: client, cni: cni, fs: fs}
 }
 
-func (i *InvokeResolver) Resolve(functionName string, requestID string, userID string) (url.URL, bool, error) {
+func (i *InvokeResolver) Resolve(functionName string, requestID string) (url.URL, bool, error) {
 	defer timec.RecordDuration("(invoke_resolver.go) Resolve() <requestID="+requestID+">", time.Now())
 	actualFunctionName := functionName
 	log.Printf("Resolve: %q (requestID=%s)\n", actualFunctionName, requestID)
@@ -78,8 +78,8 @@ func (i *InvokeResolver) Resolve(functionName string, requestID string, userID s
 		}
 	}
 	// TODO: State management: add new association between user and replica
-	i.fs.MarkUserToReplica(function.name, userID, replicaName, fecore.StrongStickiness)
-	log.Printf("[Invoke] Mark stickiness '%s': (%s) for Function '%s' <Stickiness=%d>", userID, replicaName, function.name, fecore.StrongStickiness)
+	// i.fs.MarkUserToReplica(function.name, userID, replicaName, fecore.StrongStickiness)
+	// log.Printf("[Invoke] Mark stickiness '%s': (%s) for Function '%s' <Stickiness=%d>", userID, replicaName, function.name, fecore.StrongStickiness)
 
 	urlStr := fmt.Sprintf("http://%s:%d", replicaIP, watchdogPort)
 

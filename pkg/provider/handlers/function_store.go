@@ -439,32 +439,32 @@ func getContainers(f *Function) []storage.Container {
 }
 
 // State management: mark the bitmap given function, userID and replicaID
-func (fs *FunctionStore) MarkUserToReplica(functionName string, userID string, replicaName string, stickiness fecore.StickinessRecord) error {
-	fs.dfMu.Lock()
-	defer fs.dfMu.Unlock()
+// func (fs *FunctionStore) MarkUserToReplica(functionName string, userID string, replicaName string, stickiness fecore.StickinessRecord) error {
+// 	fs.dfMu.Lock()
+// 	defer fs.dfMu.Unlock()
 
-	// Check if the function exists
-	fn, exists := fs.deployedFunctions[functionName]
-	if !exists {
-		return fmt.Errorf("[MarkUserToReplica] function %s not found", functionName)
-	}
+// 	// Check if the function exists
+// 	fn, exists := fs.deployedFunctions[functionName]
+// 	if !exists {
+// 		return fmt.Errorf("[MarkUserToReplica] function %s not found", functionName)
+// 	}
 
-	// Check if the replica exists
-	_, replicaExists := fn.idleReplicas[replicaName]
-	if !replicaExists {
-		_, replicaExists = fn.activeReplicas[replicaName]
-		if !replicaExists {
-			return fmt.Errorf("[MarkUserToReplica] container replica %s not found for function %s", replicaName, functionName)
-		}
-	}
+// 	// Check if the replica exists
+// 	_, replicaExists := fn.idleReplicas[replicaName]
+// 	if !replicaExists {
+// 		_, replicaExists = fn.activeReplicas[replicaName]
+// 		if !replicaExists {
+// 			return fmt.Errorf("[MarkUserToReplica] container replica %s not found for function %s", replicaName, functionName)
+// 		}
+// 	}
 
-	// // Ensure the nested map for the user exists
-	// if fn.UserToFunctionReplica[userID] == nil {
-	// 	fn.UserToFunctionReplica[userID] = make(map[string]fecore.StickinessRecord)
-	// }
+// 	// // Ensure the nested map for the user exists
+// 	// if fn.UserToFunctionReplica[userID] == nil {
+// 	// 	fn.UserToFunctionReplica[userID] = make(map[string]fecore.StickinessRecord)
+// 	// }
 
-	// // Mark or update the stickiness record
-	// fn.UserToFunctionReplica[userID][replicaName] = stickiness // Example usage, assuming you have defined levels of stickiness
+// 	// // Mark or update the stickiness record
+// 	// fn.UserToFunctionReplica[userID][replicaName] = stickiness // Example usage, assuming you have defined levels of stickiness
 
-	return nil
-}
+// 	return nil
+// }

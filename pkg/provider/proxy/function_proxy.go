@@ -63,23 +63,23 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 	fnSetupStart := time.Now()
 	ctx := originalReq.Context()
 	// State management: get userID
-	userID := originalReq.Header.Get("UserID")
-	if userID == "" {
-		userID = "-1"
-		// http.Error(w, "UserID is required", http.StatusBadRequest)
-		// return
-	}
+	vDAGID := originalReq.Header.Get("vDAGID")
+	workflowID := originalReq.Header.Get("workflowID")
 
 	pathVars := mux.Vars(originalReq)
 	functionName := pathVars["name"]
 	requestID := functionName + "-" + uuid.New().String()
+	firstRequestID := originalReq.Header.Get("firstRequestID")
+	if firstRequestID == "" {
+		firstRequestID = requestID
+	}
 	defer timec.RecordDuration("(function_proxy.go) proxyRequest() <requestID="+requestID+">", time.Now())
 	if functionName == "" {
 		httputil.Errorf(w, http.StatusBadRequest, "Provide function name in the request path")
 		return
 	}
 
-	functionAddr, coldStart, resolveErr := resolver.Resolve(functionName, requestID, userID)
+	functionAddr, coldStart, resolveErr := resolver.Resolve(functionName, requestID)
 	if resolveErr != nil {
 		// TODO: Should record the 404/not found error in Prometheus.
 		log.Printf("resolver error: no endpoints for %s: %s\n", functionName, resolveErr.Error())
@@ -111,7 +111,7 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 	ip := strings.Split(functionAddr.Host, ":")[0]
 
 	fnSetupTime := time.Since(fnSetupStart).Milliseconds()
-	log.Printf("[function_proxy] userID = %s, fnSetupTime = %d", userID, fnSetupTime)
+	log.Printf("[function_proxy] vDAGID = %s, workflowID = %s, fnSetupTime = %d", vDAGID, workflowID, fnSetupTime)
 	/* End function replica setup */
 
 	fnExecStart := time.Now()
@@ -163,15 +163,24 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 		httputil.Errorf(w, http.StatusInternalServerError, "Can't reach service for '%s'", functionName)
 		return
 	}
+	// Forward the response to the downstream function
+	if workflowID != "" && vDAGID != "" {
+		w.WriteHeader(response.StatusCode)
+		contentType := getContentType(originalReq.Header, response.Header)
+		if err := sendDownstreamRequest(functionName, workflowID, vDAGID, contentType, firstRequestID, response); err != nil {
+			// TODO: Failure handling here
+			log.Printf("[function_proxy] Error in sendDownstreamRequest: %v", err)
+		}
+	} else {
+		clientHeader := w.Header()
+		copyHeaders(clientHeader, &response.Header)
+		w.Header().Set("Content-Type", getContentType(originalReq.Header, response.Header))
+		w.Header().Set("Request-ID", requestID)
 
-	clientHeader := w.Header()
-	copyHeaders(clientHeader, &response.Header)
-	w.Header().Set("Content-Type", getContentType(originalReq.Header, response.Header))
-	w.Header().Set("Request-ID", requestID)
-
-	w.WriteHeader(response.StatusCode)
-	if response.Body != nil {
-		io.Copy(w, response.Body)
+		w.WriteHeader(response.StatusCode)
+		if response.Body != nil {
+			io.Copy(w, response.Body)
+		}
 	}
 }
 
