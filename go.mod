@@ -33,6 +33,7 @@ require (
 	github.com/google/uuid v1.3.0
 	github.com/jasonlvhit/gocron v0.0.1
 	github.com/mattn/go-sqlite3 v1.14.16
+	github.com/shirou/gopsutil v3.21.11+incompatible
 )
 
 require (
@@ -71,7 +72,6 @@ require (
 	github.com/prometheus/client_model v0.2.0 // indirect
 	github.com/prometheus/common v0.37.0 // indirect
 	github.com/prometheus/procfs v0.8.0 // indirect
-	github.com/shirou/gopsutil v3.21.11+incompatible // indirect
 	github.com/sirupsen/logrus v1.9.0 // indirect
 	github.com/tklauser/go-sysconf v0.3.9 // indirect
 	github.com/tklauser/numcpus v0.3.0 // indirect

@@ -30,7 +30,7 @@ func sendDownstreamRequest(functionName, workflowID, vDAGID, headerContentType, 
 	if downstreamFunction == "" {
 		// Send response back to stateflow
 		// TODO: harded coded for now; move it to healthcheck registration.
-		nextURL := "http://127.0.0.1:8088/response"
+		nextURL := "http://128.110.217.72:8088/response"
 		req, err := http.NewRequest("POST", nextURL, response.Body)
 		if err != nil {
 			return fmt.Errorf("failed to create request to stateflow: %v", err)
