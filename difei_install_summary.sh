@@ -61,6 +61,7 @@ clone_fecore_repo() {
     cd fecore
     go mod tidy
     go build
+    sudo cp fecore /usr/local/bin/ -f
 }
 
 # Install fecore

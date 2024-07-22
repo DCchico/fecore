@@ -165,6 +165,7 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 	}
 	// Forward the response to the downstream function
 	if workflowID != "" && vDAGID != "" {
+		w.Header().Set("Request-ID", requestID)
 		w.WriteHeader(response.StatusCode)
 		contentType := getContentType(originalReq.Header, response.Header)
 		if err := sendDownstreamRequest(functionName, workflowID, vDAGID, contentType, firstRequestID, response); err != nil {
