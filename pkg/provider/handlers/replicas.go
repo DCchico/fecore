@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -265,4 +266,56 @@ func createWasmReplica(fn *Function, fs *FunctionStore, requestID string, setAct
 
 	log.Printf("[createWasmReplica] Error starting WASM container '%s'", replicaName)
 	return "", "", nil, err
+}
+
+// ReplicaUpdate represents the payload for updating a single function's replica count.
+type ReplicaUpdate struct {
+	FunctionName string `json:"function_name"`
+	ReplicaCount int    `json:"replica_count"`
+}
+
+// sendReplicaUpdate sends the replica count for a specific function to stateflow.
+func sendReplicaUpdate(fecoreIP string, fecorePort int, stateflowIP string, stateflowPort string, functionName string, replicaCount int) {
+	stateflowAddr := fmt.Sprintf("http://%s:%s/replica", stateflowIP, stateflowPort)
+
+	updatePayload := ReplicaUpdate{
+		FunctionName: functionName,
+		ReplicaCount: replicaCount,
+	}
+
+	jsonPayload, err := json.Marshal(updatePayload)
+	if err != nil {
+		log.Printf("[sendReplicaUpdate] Error marshaling JSON: %v", err)
+		return
+	}
+
+	req, err := http.NewRequest("POST", stateflowAddr, bytes.NewBuffer(jsonPayload))
+	if err != nil {
+		log.Printf("[sendReplicaUpdate] Error creating request: %v", err)
+		return
+	}
+
+	req.Header.Set("Fecore-IP", fecoreIP)
+	req.Header.Set("Fecore-Port", strconv.Itoa(fecorePort))
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Printf("[sendReplicaUpdate] Error sending request to stateflow: %v", err)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		log.Printf("[sendReplicaUpdate] Failed to update stateflow, status code: %d", resp.StatusCode)
+	} else {
+		log.Printf("[sendReplicaUpdate] Successfully updated replica count for function %s to stateflow", functionName)
+	}
+}
+
+func sendReplicaUpdateAsync(fecoreIP string, fecorePort int, stateflowIP string, stateflowPort string, functionName string, replicaCount int) {
+	go func() {
+		sendReplicaUpdate(fecoreIP, fecorePort, stateflowIP, stateflowPort, functionName, replicaCount)
+	}()
 }

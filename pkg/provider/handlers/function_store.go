@@ -31,8 +31,11 @@ type FunctionStore struct {
 	coldStartTimes      []int64
 	invocationTimesCold []int64 // cold and warm distinguish how many retries
 	invocationTimesWarm []int64
-
-	nextIP net.IP
+	fecoreIP            string
+	fecorePort          int
+	stateflowIP         string
+	stateflowPort       string
+	nextIP              net.IP
 	//ipconfigs map[string]string
 	ipconfigs sync.Map
 
@@ -113,11 +116,36 @@ func InitFunctionStore(storageManager storage.StorageManager) (*FunctionStore, e
 	fs.nextNSIP = net.IPv4(10, 62, 100, 10)
 	/* End netns test */
 
+	// Get Fecore outbound IP
+	fs.fecorePort = 8081
+	fs.fecoreIP, err = getLocalIP()
+	if err != nil {
+		log.Println("Error getting IP address:", err)
+	} else {
+		log.Println("Local IP address:", fs.fecoreIP)
+	}
 	return &fs, nil
 }
 
+// Get outbound IP address of current server
+func getLocalIP() (string, error) {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return "", err
+	}
+
+	for _, addr := range addrs {
+		if ipNet, ok := addr.(*net.IPNet); ok && !ipNet.IP.IsLoopback() {
+			if ipNet.IP.To4() != nil {
+				return ipNet.IP.String(), nil
+			}
+		}
+	}
+	return "", fmt.Errorf("no suitable IP address found")
+}
+
 /**
- * Cleanup function replicas that are not being used for 100 secs
+ * Cleanup function replicas that are not being used for 300 secs
  */
 func (fs *FunctionStore) CleanupDaemon(client *containerd.Client, cni gocni.CNI) {
 	fs.dfMu.Lock()
@@ -131,11 +159,13 @@ func (fs *FunctionStore) CleanupDaemon(client *containerd.Client, cni gocni.CNI)
 	currTs := time.Now()
 	for name, fn := range fs.deployedFunctions {
 		for cn, ts := range fn.idleReplicasTs {
-			if currTs.Sub(ts).Seconds() >= 100 { // TODO 100 seconds harcoded
+			if currTs.Sub(ts).Seconds() >= 300 { // TODO 300 seconds harcoded
 				log.Println("[CleanupDaemon] Cleaning up replica :", cn)
 				delete(fs.deployedFunctions[name].idleReplicas, cn)
 				delete(fs.deployedFunctions[name].idleReplicasTs, cn)
 				deleteReplica(ctx, client, *fs.deployedFunctions[name], cni, cn)
+				fs.deployedFunctions[name].replicas -= 1
+				sendReplicaUpdateAsync(fs.fecoreIP, fs.fecorePort, fs.stateflowIP, fs.stateflowPort, name, -1)
 				// State management
 				// Also delete the association in UserToFunctionReplica map.
 				// Iterate over all users and remove this replica.
@@ -151,6 +181,7 @@ func (fs *FunctionStore) CleanupDaemon(client *containerd.Client, cni gocni.CNI)
 			}
 		}
 	}
+	// TODO: let stateflow knows a full map update async if there are replicas being reclaimed
 }
 
 /* Gets a function's metadata from DB, creates/populates Function struct
@@ -268,6 +299,8 @@ func (fs *FunctionStore) AddActiveReplica(fn string, cn string, ip string, reque
 	// }
 	fs.dfMu.Lock()
 	fs.deployedFunctions[fn].activeReplicas[cn] = ip
+	fs.deployedFunctions[fn].replicas += 1
+	sendReplicaUpdateAsync(fs.fecoreIP, fs.fecorePort, fs.stateflowIP, fs.stateflowPort, fn, 1)
 	fs.dfMu.Unlock()
 
 	return nil

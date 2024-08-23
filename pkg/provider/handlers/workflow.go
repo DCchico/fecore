@@ -5,6 +5,8 @@ import (
 	"log"
 	"net/http"
 	"sync"
+
+	"github.com/openfaas/faas-provider/types"
 )
 
 type FecoreAddress struct {
@@ -18,9 +20,10 @@ type FunctionState struct {
 }
 
 type FunctionInvocation struct {
-	FunctionName   string          `json:"functionName"`
-	Downstream     string          `json:"downstream"`
-	FunctionStates []FunctionState `json:"functionstates"`
+	FunctionName   string                   `json:"functionName"`
+	Downstream     string                   `json:"downstream"`
+	FunctionStates []FunctionState          `json:"functionstates"`
+	Parameters     types.FunctionDeployment `json:"parameters"`
 }
 
 type Workflow struct {

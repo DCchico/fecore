@@ -69,6 +69,11 @@ func getNodeConditions() ([]NodeCondition, HealthStatus) {
 			log.Println("[HealthCheck] Current CPU Condition: CPUPressure")
 		}
 	}
+	// Get Function Replicas
+	// fns := fs.GetDeployedFunctions()
+	// for _, fn =: range fns {
+
+	// }
 
 	// Check if the node is ready (this is an example, customize as needed)
 	conditions = append(conditions, Ready)
@@ -81,6 +86,16 @@ func getNodeConditions() ([]NodeCondition, HealthStatus) {
 func MakeHealthCheckHandler(client *containerd.Client, cni gocni.CNI, fs *FunctionStore) func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
 		log.Println("[HealthCheck] Received health check request")
+		// Extract Stateflow IP and Port from headers
+		stateflowIP := r.Header.Get("Stateflow-IP")
+		stateflowPort := r.Header.Get("Stateflow-Port")
+		if stateflowIP != "" && stateflowPort != "" {
+			log.Printf("[HealthCheck] Received Stateflow IP: %s and Port: %s", stateflowIP, stateflowPort)
+			fs.dfMu.Lock()
+			fs.stateflowIP = stateflowIP
+			fs.stateflowPort = stateflowPort
+			fs.dfMu.Unlock()
+		}
 		_, healthStatus := getNodeConditions()
 
 		w.Header().Set("Content-Type", "application/json")

@@ -65,6 +65,7 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 	// State management: get userID
 	vDAGID := originalReq.Header.Get("vDAGID")
 	workflowID := originalReq.Header.Get("workflowID")
+	isForwardDownstream := ""
 
 	pathVars := mux.Vars(originalReq)
 	functionName := pathVars["name"]
@@ -123,6 +124,7 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 			//log.Printf("[function_proxy] Err connecting to function: %s", err.Error())
 			//sleepQuantum += 5
 			connectionRetries += 1
+			log.Printf("---------------RETRY----------------------%s", err)
 			time.Sleep(time.Duration(sleepQuantum) * time.Millisecond)
 		} else {
 			break
@@ -164,7 +166,7 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 		return
 	}
 	// Forward the response to the downstream function
-	if workflowID != "" && vDAGID != "" {
+	if workflowID != "" && vDAGID != "" && isForwardDownstream != "" {
 		w.WriteHeader(response.StatusCode)
 		contentType := getContentType(originalReq.Header, response.Header)
 		if err := sendDownstreamRequest(functionName, workflowID, vDAGID, contentType, firstRequestID, response); err != nil {

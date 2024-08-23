@@ -99,6 +99,7 @@ func MakeDeployHandler(client *containerd.Client, cni gocni.CNI, secretMountPath
 			http.Error(w, deployErr.Error(), http.StatusBadRequest)
 			return
 		}
+		fn.replicas = 1
 		err = fs.AddDeployedFunction(&fn)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
