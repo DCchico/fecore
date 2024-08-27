@@ -4,6 +4,7 @@ Based on "github.com/openfaas/faas-provider/proxy"
 package proxy
 
 import (
+	"bytes"
 	"io"
 	"log"
 	"net/http"
@@ -82,25 +83,18 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 
 	functionAddr, coldStart, resolveErr := resolver.Resolve(functionName, requestID)
 	if resolveErr != nil {
-		// TODO: Should record the 404/not found error in Prometheus.
 		log.Printf("resolver error: no endpoints for %s: %s\n", functionName, resolveErr.Error())
 		httputil.Errorf(w, http.StatusServiceUnavailable, "No endpoints available for: %s.", functionName)
 		return
 	}
 
-	var proxyReq *http.Request
-	var err error
-	proxyReq, err = buildProxyRequest(originalReq, functionAddr, pathVars["params"])
-	if err != nil {
-		httputil.Errorf(w, http.StatusInternalServerError, "Failed to resolve service: %s.", functionName)
-		return
+	// Read the original request body
+	var bodyBytes []byte
+	if originalReq.Body != nil {
+		bodyBytes, _ = io.ReadAll(originalReq.Body)
+		originalReq.Body.Close() // Close original request body
 	}
 
-	if proxyReq.Body != nil {
-		defer proxyReq.Body.Close()
-	}
-
-	var response *http.Response
 	maxRetries := 1000
 	connectionRetries := 0
 	var totalConnectTime int64
@@ -115,17 +109,28 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 	log.Printf("[function_proxy] vDAGID = %s, workflowID = %s, fnSetupTime = %d", vDAGID, workflowID, fnSetupTime)
 	/* End function replica setup */
 
+	var response *http.Response
+	var proxyReq *http.Request
+	var err error
 	fnExecStart := time.Now()
 	totalConnectTime = -1
 	for connectionRetries < maxRetries {
 		connStart = time.Now()
+		proxyReq, err = buildProxyRequest(originalReq, functionAddr, pathVars["params"], bodyBytes)
+		if err != nil {
+			httputil.Errorf(w, http.StatusInternalServerError, "Failed to resolve service: %s.", functionName)
+			return
+		}
+
 		response, err = proxyClient.Do(proxyReq.WithContext(ctx))
 		if err != nil {
-			//log.Printf("[function_proxy] Err connecting to function: %s", err.Error())
-			//sleepQuantum += 5
 			connectionRetries += 1
-			log.Printf("---------------RETRY----------------------%s", err)
+			// log.Printf("---------------RETRY----------------------%s", err)
 			time.Sleep(time.Duration(sleepQuantum) * time.Millisecond)
+		} else if response.StatusCode == 500 && coldStart {
+			connectionRetries += 1
+			// log.Printf("---------------RETRY----------------------Received 500 error from function, retrying... ")
+			time.Sleep(10 * time.Duration(sleepQuantum) * time.Millisecond)
 		} else {
 			break
 		}
@@ -159,18 +164,21 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 	fs.UpdateFunctionStats(functionName, fnSetupTime, fnExecTime)
 
 	ip = strings.Split(functionAddr.Host, ":")[0]
-	err = fs.UpdateReplicaStatusInactive(functionName, ip, requestID)
-	if err != nil {
-		log.Printf("[function_proxy] Unable to update function replica status '%s': %s\n", proxyReq.URL.String(), err.Error())
-		httputil.Errorf(w, http.StatusInternalServerError, "Can't reach service for '%s'", functionName)
-		return
+	if proxyReq != nil && proxyReq.URL != nil { // Check if proxyReq and proxyReq.URL are not nil
+		err = fs.UpdateReplicaStatusInactive(functionName, ip, requestID)
+		if err != nil {
+			log.Printf("[function_proxy] Unable to update function replica status '%s': %s\n", proxyReq.URL.String(), err.Error())
+			httputil.Errorf(w, http.StatusInternalServerError, "Can't reach service for '%s'", functionName)
+			return
+		}
+	} else {
+		log.Printf("[function_proxy] proxyReq or proxyReq.URL was nil, unable to update replica status.")
 	}
 	// Forward the response to the downstream function
 	if workflowID != "" && vDAGID != "" && isForwardDownstream != "" {
 		w.WriteHeader(response.StatusCode)
 		contentType := getContentType(originalReq.Header, response.Header)
 		if err := sendDownstreamRequest(functionName, workflowID, vDAGID, contentType, firstRequestID, response); err != nil {
-			// TODO: Failure handling here
 			log.Printf("[function_proxy] Error in sendDownstreamRequest: %v", err)
 		}
 	} else {
@@ -188,7 +196,7 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 
 // buildProxyRequest creates a request object for the proxy request, it will ensure that
 // the original request headers are preserved as well as setting openfaas system headers
-func buildProxyRequest(originalReq *http.Request, baseURL url.URL, extraPath string) (*http.Request, error) {
+func buildProxyRequest(originalReq *http.Request, baseURL url.URL, extraPath string, body []byte) (*http.Request, error) {
 
 	host := baseURL.Host
 	if baseURL.Port() == "" {
@@ -202,7 +210,7 @@ func buildProxyRequest(originalReq *http.Request, baseURL url.URL, extraPath str
 		RawQuery: originalReq.URL.RawQuery,
 	}
 
-	upstreamReq, err := http.NewRequest(originalReq.Method, url.String(), nil)
+	upstreamReq, err := http.NewRequest(originalReq.Method, url.String(), bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
@@ -213,10 +221,6 @@ func buildProxyRequest(originalReq *http.Request, baseURL url.URL, extraPath str
 	}
 	if upstreamReq.Header.Get("X-Forwarded-For") == "" {
 		upstreamReq.Header["X-Forwarded-For"] = []string{originalReq.RemoteAddr}
-	}
-
-	if originalReq.Body != nil {
-		upstreamReq.Body = originalReq.Body
 	}
 
 	return upstreamReq, nil
