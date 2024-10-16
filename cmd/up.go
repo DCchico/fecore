@@ -1,10 +1,12 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"io/ioutil"
 	"log"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path"
 	"sync"
@@ -16,7 +18,10 @@ import (
 	"github.com/spf13/cobra"
 	flag "github.com/spf13/pflag"
 
+	"bytes"
+
 	units "github.com/docker/go-units"
+	"github.com/go-redis/redis/v8"
 	"github.gatech.edu/faasedge/fecore/pkg"
 )
 
@@ -130,6 +135,31 @@ func runUp(cmd *cobra.Command, _ []string) error {
 		go v.Start()
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	redisClient, err := startRedis(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		redisClient.Close()
+		cancel() // This will stop the Redis server
+	}()
+
+	// Test Redis connection
+	err = redisClient.Set(ctx, "test_key", "test_value", 0).Err()
+	if err != nil {
+		log.Printf("Failed to set key in Redis: %v", err)
+	} else {
+		value, err := redisClient.Get(ctx, "test_key").Result()
+		if err != nil {
+			log.Printf("Failed to get key from Redis: %v", err)
+		} else {
+			log.Printf("Redis test successful. Key: test_key, Value: %s", value)
+		}
+	}
+
 	wg.Wait()
 	return nil
 }
@@ -203,4 +233,63 @@ func parseUpFlags(cmd *cobra.Command) (upConfig, error) {
 	parsed.composeFilePath = path
 	parsed.workingDir = fecorewd
 	return parsed, err
+}
+
+func startRedis(ctx context.Context) (*redis.Client, error) {
+	// Check if Redis is already running
+	cmd := exec.Command("pgrep", "redis-server")
+	output, err := cmd.Output()
+	if err == nil && len(output) > 0 {
+		log.Println("Redis is already running. Stopping existing instance...")
+		stopCmd := exec.Command("redis-cli", "shutdown")
+		if err := stopCmd.Run(); err != nil {
+			return nil, fmt.Errorf("failed to stop existing Redis: %w", err)
+		}
+		// Wait a moment for the server to fully stop
+		time.Sleep(time.Second)
+	}
+
+	// Start Redis server without protected mode and binding to all interfaces
+	cmd = exec.CommandContext(ctx, "redis-server",
+		"--protected-mode", "no",
+		"--bind", "0.0.0.0")
+
+	// Capture stdout and stderr
+	var outb, errb bytes.Buffer
+	cmd.Stdout = &outb
+	cmd.Stderr = &errb
+
+	// Run Redis in the foreground
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("failed to start Redis: %w", err)
+	}
+
+	// Use a goroutine to wait for the command to finish and log its output
+	go func() {
+		err := cmd.Wait()
+		if err != nil {
+			log.Printf("Redis server stopped with error: %v\nStdout: %s\nStderr: %s", err, outb.String(), errb.String())
+		} else {
+			log.Printf("Redis server stopped without error\nStdout: %s\nStderr: %s", outb.String(), errb.String())
+		}
+	}()
+
+	// Give Redis a moment to start
+	time.Sleep(time.Second)
+
+	// Create a Redis client
+	client := redis.NewClient(&redis.Options{
+		Addr: "localhost:6379",
+	})
+
+	// Ping the Redis server to ensure it's running
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	_, err = client.Ping(ctx).Result()
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to Redis: %w", err)
+	}
+
+	log.Println("Redis started successfully without protection, bound to all interfaces")
+	return client, nil
 }

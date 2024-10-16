@@ -33,6 +33,7 @@ type Function struct {
 	envVars        map[string]string
 	envProcess     string
 	memoryLimit    int64
+	cpuLimit       int64
 	createdAt      time.Time // not used
 	/* State management: stickiness between userID and functionReplica
 	N to N mapping implemented in a bitmap -> 2D map array

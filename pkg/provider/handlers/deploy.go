@@ -9,6 +9,7 @@ import (
 	"io"
 	"io/ioutil"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"path"
@@ -17,9 +18,7 @@ import (
 
 	"github.com/containerd/containerd"
 	"github.com/containerd/containerd/cio"
-	"github.com/containerd/containerd/containers"
 	"github.com/containerd/containerd/namespaces"
-	"github.com/containerd/containerd/oci"
 	gocni "github.com/containerd/go-cni"
 	"github.com/docker/distribution/reference"
 	"github.com/opencontainers/runtime-spec/specs-go"
@@ -139,6 +138,18 @@ func prepull(ctx context.Context, req types.FunctionDeployment, client *containe
 func deploy(ctx context.Context, req types.FunctionDeployment, client *containerd.Client, cni gocni.CNI,
 	secretMountPath string, alwaysPull bool, fn *Function, fs *FunctionStore) error {
 
+	// Get the host machine's IP address
+	hostIP, err := getHostIP()
+	if err != nil {
+		return fmt.Errorf("failed to get host IP: %w", err)
+	}
+
+	// Add the Redis address as an environment variable
+	if req.EnvVars == nil {
+		req.EnvVars = make(map[string]string)
+	}
+	req.EnvVars["FECORE_REDIS_ADDRESS"] = fmt.Sprintf("%s:6379", hostIP)
+
 	labels, err := buildLabels(&req)
 	if err != nil {
 		return fmt.Errorf("[deploy] Unable to build labels for Function '%s': %w", fn.name, err)
@@ -173,21 +184,39 @@ func deploy(ctx context.Context, req types.FunctionDeployment, client *container
 	fn.envVars = req.EnvVars
 	fn.labels = labels
 
-	var memory *specs.LinuxMemory
-	if req.Limits != nil && len(req.Limits.Memory) > 0 {
-		memory = &specs.LinuxMemory{}
-
-		qty, err := resource.ParseQuantity(req.Limits.Memory)
-		if err != nil {
-			log.Printf("[deploy] Error parsing memory limit '%q' as quantity for Function '%s': %s", req.Limits.Memory, fn.name, err.Error())
+	if req.Limits != nil {
+		if len(req.Limits.Memory) > 0 {
+			qty, err := resource.ParseQuantity(req.Limits.Memory)
+			if err != nil {
+				fn.memoryLimit = 50 * 1024 * 1024
+				log.Printf("[deploy] Error parsing memory limit '%q' as quantity for Function '%s': %s", req.Limits.Memory, fn.name, err.Error())
+			} else {
+				fn.memoryLimit = qty.Value()
+				log.Printf("[deploy] Set memory limit for Function '%s' to %d bytes", fn.name, fn.memoryLimit)
+			}
+		} else {
+			fn.memoryLimit = 50 * 1024 * 1024
+			log.Printf("[deploy] No valid memory limit set for Function '%s', using default limit of %d bytes", fn.name, fn.memoryLimit)
 		}
-		v := qty.Value()
-		memory.Limit = &v
-		fn.memoryLimit = v
+
+		if len(req.Limits.CPU) > 0 {
+			cpuLimit, err := resource.ParseQuantity(req.Limits.CPU)
+			if err != nil {
+				fn.cpuLimit = 500 // Default to 500 milliCPU (0.5 CPU)
+				log.Printf("[deploy] Error parsing CPU limit '%q' for Function '%s': %s", req.Limits.CPU, fn.name, err.Error())
+			} else {
+				fn.cpuLimit = cpuLimit.MilliValue()
+				log.Printf("[deploy] Set CPU limit for Function '%s' to %d milliCPU", fn.name, fn.cpuLimit)
+			}
+		} else {
+			fn.cpuLimit = 500 // Default to 500 milliCPU (0.5 CPU)
+			log.Printf("[deploy] No valid CPU limit set for Function '%s', using default limit of %d milliCPU", fn.name, fn.cpuLimit)
+		}
 	} else {
-		fn.memoryLimit = 0
+		fn.memoryLimit = 50 * 1024 * 1024
+		fn.cpuLimit = 500
+		log.Printf("[deploy] No limits set for Function '%s', using default memory limit of %d bytes and CPU limit of %d milliCPU", fn.name, fn.memoryLimit, fn.cpuLimit)
 	}
-	fn.memoryLimit = 50000000 // TODO probably bug in crun latest version
 
 	startTime := time.Now()
 	replicaName, createReplicaStatus := createReplica(client, cni, fs, fn, "Deploy", false)
@@ -322,24 +351,6 @@ func validateSecrets(secretMountPath string, secrets []string) error {
 	return nil
 }
 
-func withMemory(mem *specs.LinuxMemory) oci.SpecOpts {
-	return func(ctx context.Context, _ oci.Client, c *containers.Container, s *oci.Spec) error {
-		if mem != nil {
-			if s.Linux == nil {
-				s.Linux = &specs.Linux{}
-			}
-			if s.Linux.Resources == nil {
-				s.Linux.Resources = &specs.LinuxResources{}
-			}
-			if s.Linux.Resources.Memory == nil {
-				s.Linux.Resources.Memory = &specs.LinuxMemory{}
-			}
-			s.Linux.Resources.Memory.Limit = mem.Limit
-		}
-		return nil
-	}
-}
-
 // Ref: https://medium.com/@skdomino/taring-untaring-files-in-go-6b07cf56bc07
 // Untar takes a destination path and a reader; a tar reader loops over the tarfile
 // creating the file structure at 'dst' along the way, and writing any files
@@ -392,4 +403,20 @@ func untar(dst string, r io.Reader) error {
 			f.Close()
 		}
 	}
+}
+
+// getHostIP returns the IP address of the host machine
+func getHostIP() (string, error) {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return "", err
+	}
+	for _, addr := range addrs {
+		if ipnet, ok := addr.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
+			if ipnet.IP.To4() != nil {
+				return ipnet.IP.String(), nil
+			}
+		}
+	}
+	return "", fmt.Errorf("no suitable IP address found")
 }

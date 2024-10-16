@@ -4,10 +4,11 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path"
 
-	systemd "github.gatech.edu/faasedge/fecore/pkg/systemd"
 	"github.com/pkg/errors"
+	systemd "github.gatech.edu/faasedge/fecore/pkg/systemd"
 
 	"github.com/spf13/cobra"
 )
@@ -53,6 +54,10 @@ func runInstall(_ *cobra.Command, _ []string) error {
 	err := binExists("/usr/local/bin/", "fecore")
 	if err != nil {
 		return err
+	}
+
+	if err := installRedis(); err != nil {
+		return errors.Wrap(err, "failed to install Redis")
 	}
 
 	err = systemd.InstallUnit("fecore-provider", map[string]string{
@@ -147,4 +152,18 @@ func cp(source, destFolder string) error {
 	_, err = io.Copy(out, file)
 
 	return err
+}
+
+func installRedis() error {
+	cmd := exec.Command("apt-get", "update")
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to update package list: %w", err)
+	}
+
+	cmd = exec.Command("apt-get", "install", "-y", "redis-server")
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to install Redis: %w", err)
+	}
+
+	return nil
 }

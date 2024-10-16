@@ -15,6 +15,7 @@ import (
 
 	"github.com/KarpelesLab/reflink"
 	"github.com/containerd/containerd"
+	"github.com/containerd/containerd/containers"
 	"github.com/containerd/containerd/namespaces"
 	"github.com/containerd/containerd/oci"
 	gocni "github.com/containerd/go-cni"
@@ -155,10 +156,24 @@ func createReplica(client *containerd.Client, cni gocni.CNI, fs *FunctionStore, 
 	// }
 
 	var memory *specs.LinuxMemory
-	memory = &specs.LinuxMemory{}
-	memory.Limit = &fn.memoryLimit
+	var cpu *specs.LinuxCPU
 
-	log.Printf("[createReplica] Creating new container for Function '%s'", name)
+	if fn.memoryLimit > 0 {
+		memory = &specs.LinuxMemory{
+			Limit: &fn.memoryLimit,
+		}
+	}
+
+	if fn.cpuLimit > 0 {
+		period := uint64(100000)
+		quota := fn.cpuLimit * int64(period/1000) // Convert milliCPU to quota
+		cpu = &specs.LinuxCPU{
+			Period: &period,
+			Quota:  &quota,
+		}
+	}
+
+	log.Printf("[createReplica] Creating new container for Function '%s' with memory limit: %d bytes, CPU limit: %d milliCPU", name, fn.memoryLimit, fn.cpuLimit)
 	container, err := client.NewContainer(
 		ctx,
 		name,
@@ -172,7 +187,8 @@ func createReplica(client *containerd.Client, cni gocni.CNI, fs *FunctionStore, 
 			oci.WithMounts(mounts),
 			oci.WithAnnotations(labels),
 			oci.WithEnv(envs),
-			withMemory(memory)),
+			withMemory(memory),
+			withCPU(cpu)),
 		containerd.WithContainerLabels(labels),
 	)
 
@@ -318,4 +334,41 @@ func sendReplicaUpdateAsync(fecoreIP string, fecorePort int, stateflowIP string,
 	go func() {
 		sendReplicaUpdate(fecoreIP, fecorePort, stateflowIP, stateflowPort, functionName, replicaCount)
 	}()
+}
+
+// Add these helper functions at the end of the file
+func withMemory(mem *specs.LinuxMemory) oci.SpecOpts {
+	return func(ctx context.Context, _ oci.Client, c *containers.Container, s *oci.Spec) error {
+		if mem != nil {
+			if s.Linux == nil {
+				s.Linux = &specs.Linux{}
+			}
+			if s.Linux.Resources == nil {
+				s.Linux.Resources = &specs.LinuxResources{}
+			}
+			if s.Linux.Resources.Memory == nil {
+				s.Linux.Resources.Memory = &specs.LinuxMemory{}
+			}
+			s.Linux.Resources.Memory.Limit = mem.Limit
+		}
+		return nil
+	}
+}
+
+func withCPU(cpu *specs.LinuxCPU) oci.SpecOpts {
+	return func(ctx context.Context, _ oci.Client, c *containers.Container, s *oci.Spec) error {
+		if cpu != nil {
+			if s.Linux == nil {
+				s.Linux = &specs.Linux{}
+			}
+			if s.Linux.Resources == nil {
+				s.Linux.Resources = &specs.LinuxResources{}
+			}
+			if s.Linux.Resources.CPU == nil {
+				s.Linux.Resources.CPU = &specs.LinuxCPU{}
+			}
+			s.Linux.Resources.CPU = cpu
+		}
+		return nil
+	}
 }

@@ -61,7 +61,7 @@ func sendDownstreamRequest(functionName, workflowID, vDAGID, headerContentType, 
 		return fmt.Errorf("next fecore address not found for function %s in workflow %s", downstreamFunction, workflowID)
 	}
 
-	nextURL := fmt.Sprintf("http://%s:%d/function/%s", nextFecoreAddr.IP, nextFecoreAddr.Port, downstreamFunction)
+	nextURL := fmt.Sprintf("http://%s:%d/function/%s", nextFecoreAddr[0].IP, nextFecoreAddr[0].Port, downstreamFunction)
 	req, err := http.NewRequest("POST", nextURL, response.Body)
 	if err != nil {
 		return fmt.Errorf("failed to create request to next function: %v", err)

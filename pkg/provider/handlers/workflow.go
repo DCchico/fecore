@@ -27,10 +27,11 @@ type FunctionInvocation struct {
 }
 
 type Workflow struct {
-	ID               string                              `json:"id"`
-	VDAGs            []string                            `json:"vDAGs"`
-	FunctionSequence []FunctionInvocation                `json:"functionSequence"`
-	VDAGsMap         map[string]map[string]FecoreAddress `json:"vDAGsMap"`
+	ID                  string                                `json:"id"`
+	VDAGs               []string                              `json:"vDAGs"`
+	FunctionSequence    []FunctionInvocation                  `json:"functionSequence"`
+	VDAGsMap            map[string]map[string][]FecoreAddress `json:"vDAGsMap"`
+	VDAGsSequenceNumber map[string]map[string]int             `json:"vDAGsSequenceNumber"`
 }
 
 var (
