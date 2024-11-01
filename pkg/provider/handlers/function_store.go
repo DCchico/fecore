@@ -508,3 +508,36 @@ func getContainers(f *Function) []storage.Container {
 
 // 	return nil
 // }
+
+// GetIdleReplicaAtomic attempts to get an idle replica atomically, returning empty strings if none available
+func (fs *FunctionStore) GetIdleReplicaAtomic(fn string, requestID string) (string, string, bool, error) {
+	defer timec.RecordDuration("(function_store.go) GetIdleReplicaAtomic() <requestID="+requestID+">", time.Now())
+	fs.dfMu.Lock()
+	defer fs.dfMu.Unlock()
+
+	function, exists := fs.deployedFunctions[fn]
+	if !exists {
+		return "", "", false, fmt.Errorf("function %s not found", fn)
+	}
+
+	// Check if there are any idle replicas
+	if len(function.idleReplicas) == 0 {
+		return "", "", false, nil
+	}
+
+	// Get first available replica
+	var name string
+	var ip string
+	for k, v := range function.idleReplicas {
+		name = k
+		ip = v
+		break
+	}
+
+	// Move replica from idle to active
+	delete(function.idleReplicas, name)
+	delete(function.idleReplicasTs, name)
+	function.activeReplicas[name] = ip
+
+	return name, ip, true, nil
+}

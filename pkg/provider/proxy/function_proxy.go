@@ -127,7 +127,7 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 			connectionRetries += 1
 			// log.Printf("---------------RETRY----------------------%s", err)
 			time.Sleep(time.Duration(sleepQuantum) * time.Millisecond)
-		} else if response.StatusCode == 500 && coldStart {
+		} else if response.StatusCode == 500 {
 			connectionRetries += 1
 			// log.Printf("---------------RETRY----------------------Received 500 error from function, retrying... ")
 			time.Sleep(10 * time.Duration(sleepQuantum) * time.Millisecond)
