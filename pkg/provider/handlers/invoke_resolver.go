@@ -69,7 +69,9 @@ func (i *InvokeResolver) Resolve(functionName string, requestID string) (url.URL
 		}
 		timec.RecordDuration("(invoke_resolver.go).Resolve.[CreateReplicaTime] <requestID="+requestID+">", startTime)
 		coldStartTime := time.Since(startTime)
+		i.fs.dfMu.RLock()
 		replicaIP = function.activeReplicas[replicaName]
+		i.fs.dfMu.RUnlock()
 		i.fs.AddActiveReplica(function.name, replicaName, replicaIP, requestID)
 		i.fs.RecordColdStartTime(coldStartTime, requestID)
 		log.Printf("[Invoke] Using new replica '%s' (%s) for Function '%s' <requestID=%s>", replicaName, replicaIP, function.name, requestID)

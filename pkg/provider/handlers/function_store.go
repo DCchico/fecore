@@ -251,7 +251,6 @@ func (fs *FunctionStore) UpdateDeployedFunction(fn *Function) error {
 func (fs *FunctionStore) RemoveDeployedFunction(name string) error {
 	fs.dfMu.RLock()
 	fn := fs.deployedFunctions[name]
-	fs.dfMu.RUnlock()
 
 	err := fs.storageManager.DeleteFunction(name)
 	if err != nil {
@@ -260,6 +259,7 @@ func (fs *FunctionStore) RemoveDeployedFunction(name string) error {
 	for _, c := range getContainers(fn) {
 		fs.storageManager.DeleteContainer(c.Name)
 	}
+	fs.dfMu.RUnlock()
 
 	fs.dfMu.Lock()
 	defer fs.dfMu.Unlock()
