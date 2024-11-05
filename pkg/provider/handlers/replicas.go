@@ -98,12 +98,14 @@ func createReplica(client *containerd.Client, cni gocni.CNI, fs *FunctionStore, 
 			// // Store UUID,PID in fn
 			// ip := result.Interfaces["eth1"].IPConfigs[0].IP.String()
 			// wasmCmd.Process.Signal(syscall.SIGUSR1)
+			fs.dfMu.Lock()
 			if setActive {
 				fn.activeReplicas[wasmName] = ip
 			} else {
 				fn.idleReplicas[wasmName] = ip
 			}
 			fn.pid[wasmName] = uint32(wasmPid)
+			fs.dfMu.Unlock()
 		}
 		return wasmName, nil
 	}
@@ -211,11 +213,13 @@ func createReplica(client *containerd.Client, cni gocni.CNI, fs *FunctionStore, 
 		// if err != nil {
 		// 	return "", fmt.Errorf("[createReplica] Unable to get IP for container '%s': %w", name, err)
 		// }
+		fs.dfMu.Lock()
 		if setActive {
 			fn.activeReplicas[name] = ip
 		} else {
 			fn.idleReplicas[name] = ip
 		}
+		fs.dfMu.Unlock()
 		return name, nil
 	}
 	return "", err

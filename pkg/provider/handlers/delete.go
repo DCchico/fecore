@@ -60,13 +60,14 @@ func MakeDeleteHandler(client *containerd.Client, cni gocni.CNI, fs *FunctionSto
 
 		// Remove each Function replica
 		fn, err := fs.GetDeployedFunction(name, "Delete <"+name+">")
+		fs.dfMu.Lock()
 		for rname := range fn.idleReplicas {
 			deleteReplica(ctx, client, fn, cni, rname)
 		}
 		for rname := range fn.activeReplicas {
 			deleteReplica(ctx, client, fn, cni, rname)
 		}
-
+		fs.dfMu.Unlock()
 		fs.RemoveDeployedFunction(name)
 
 		log.Printf("[Delete] Deleted Function '%s'\n", name)
