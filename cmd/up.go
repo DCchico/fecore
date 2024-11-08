@@ -254,7 +254,6 @@ func startRedis(ctx context.Context) (*redis.Client, error) {
 		"--protected-mode", "no",
 		"--bind", "0.0.0.0")
 
-	// Capture stdout and stderr
 	var outb, errb bytes.Buffer
 	cmd.Stdout = &outb
 	cmd.Stderr = &errb
@@ -268,9 +267,8 @@ func startRedis(ctx context.Context) (*redis.Client, error) {
 	go func() {
 		err := cmd.Wait()
 		if err != nil {
-			log.Printf("Redis server stopped with error: %v\nStdout: %s\nStderr: %s", err, outb.String(), errb.String())
-		} else {
-			log.Printf("Redis server stopped without error\nStdout: %s\nStderr: %s", outb.String(), errb.String())
+			log.Printf("Redis server stopped with error: %v\nStdout: %s\nStderr: %s",
+				err, outb.String(), errb.String())
 		}
 	}()
 
@@ -285,6 +283,7 @@ func startRedis(ctx context.Context) (*redis.Client, error) {
 	// Ping the Redis server to ensure it's running
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
+
 	_, err = client.Ping(ctx).Result()
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to Redis: %w", err)
