@@ -53,6 +53,7 @@ type FunctionStore struct {
 	metricMu sync.RWMutex
 	ipamMu   sync.RWMutex
 	dfMu     sync.RWMutex
+	statsMu  sync.RWMutex
 	/* End mutexes */
 }
 
@@ -228,6 +229,8 @@ func (fs *FunctionStore) AddDeployedFunction(fn *Function) error {
 	fs.dfMu.Unlock()
 
 	/* Begin init stats for this fn */
+	fs.statsMu.Lock()
+	defer fs.statsMu.Unlock()
 	fnStats := FunctionStats{}
 	fnStats.startupTimesPos = 0
 	fnStats.execTimesPos = 0
@@ -248,7 +251,6 @@ func (fs *FunctionStore) UpdateDeployedFunction(fn *Function) error {
 func (fs *FunctionStore) RemoveDeployedFunction(name string) error {
 	fs.dfMu.RLock()
 	fn := fs.deployedFunctions[name]
-	fs.dfMu.RUnlock()
 
 	err := fs.storageManager.DeleteFunction(name)
 	if err != nil {
@@ -257,6 +259,7 @@ func (fs *FunctionStore) RemoveDeployedFunction(name string) error {
 	for _, c := range getContainers(fn) {
 		fs.storageManager.DeleteContainer(c.Name)
 	}
+	fs.dfMu.RUnlock()
 
 	fs.dfMu.Lock()
 	defer fs.dfMu.Unlock()
@@ -398,13 +401,17 @@ func (fs *FunctionStore) ProcessFunctionStats() {
 		select {
 		case stat := <-fs.statsChan:
 			fn := stat.fn
-			startupTimesPos := fs.functionStats[fn].startupTimesPos
-			execTimesPos := fs.functionStats[fn].execTimesPos
-			fs.functionStats[fn].startupTimes[startupTimesPos] = stat.startupTime
-			fs.functionStats[fn].execTimes[execTimesPos] = stat.execTime
-			fs.functionStats[fn].startupTimesPos = (startupTimesPos + 1) % MAX_ENTRIES
-			fs.functionStats[fn].execTimesPos = (execTimesPos + 1) % MAX_ENTRIES
-			log.Printf("[ProcessFunctionStats()] Added entry #%d: fn=%s, startupTime=%d, execTime=%d", startupTimesPos, fn, fs.functionStats[fn].startupTimes[startupTimesPos], fs.functionStats[fn].execTimes[execTimesPos])
+			fs.statsMu.Lock()
+			if _, ok := fs.functionStats[fn]; ok {
+				startupTimesPos := fs.functionStats[fn].startupTimesPos
+				execTimesPos := fs.functionStats[fn].execTimesPos
+				fs.functionStats[fn].startupTimes[startupTimesPos] = stat.startupTime
+				fs.functionStats[fn].execTimes[execTimesPos] = stat.execTime
+				fs.functionStats[fn].startupTimesPos = (startupTimesPos + 1) % MAX_ENTRIES
+				fs.functionStats[fn].execTimesPos = (execTimesPos + 1) % MAX_ENTRIES
+				log.Printf("[ProcessFunctionStats()] Added entry #%d: fn=%s, startupTime=%d, execTime=%d", startupTimesPos, fn, fs.functionStats[fn].startupTimes[startupTimesPos], fs.functionStats[fn].execTimes[execTimesPos])
+			}
+			fs.statsMu.Unlock()
 		}
 	}
 }
