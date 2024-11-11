@@ -60,7 +60,7 @@ var defaultCNIConf = fmt.Sprintf(`
         "type": "bridge",
         "bridge": "%s",
         "isGateway": true,
-        "ipMasq": false,
+        "ipMasq": true,    
         "ipam": {
             "type": "host-local",
             "subnet": "%s",
@@ -68,6 +68,9 @@ var defaultCNIConf = fmt.Sprintf(`
             "routes": [
                 { "dst": "0.0.0.0/0" }
             ]
+        },
+        "capabilities": {
+            "portMappings": true
         }
       }
     ]
