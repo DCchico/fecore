@@ -5,8 +5,12 @@ package proxy
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"log"
+	"math"
+	"math/rand"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -19,7 +23,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/openfaas/faas-provider/proxy"
+	// "github.com/openfaas/faas-provider/proxy"
 
 	"github.gatech.edu/faasedge/fecore/pkg/provider/handlers"
 	"github.gatech.edu/faasedge/fecore/pkg/timec"
@@ -28,6 +32,14 @@ import (
 const (
 	watchdogPort       = "8080"
 	defaultContentType = "text/plain"
+	dialTimeout        = 2 * time.Second
+	responseTimeout    = 5 * time.Second
+	maxIdleConns       = 100
+	maxIdleConnsPerHost = 20
+	idleConnTimeout    = 30 * time.Second
+	maxRetries         = 5
+	baseBackoff        = 50 // ms
+	maxBackoff         = 500 // ms
 )
 
 func NewHandlerFunc(config types.FaaSConfig, resolver *handlers.InvokeResolver, fs *handlers.FunctionStore) http.HandlerFunc {
@@ -35,7 +47,24 @@ func NewHandlerFunc(config types.FaaSConfig, resolver *handlers.InvokeResolver, 
 		panic("NewHandlerFunc: empty proxy handler resolver, cannot be nil")
 	}
 
-	proxyClient := proxy.NewProxyClientFromConfig(config)
+	// Create a custom transport with tuned parameters
+	customTransport := &http.Transport{
+		DialContext: (&net.Dialer{
+			Timeout:   dialTimeout,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+		MaxIdleConns:          maxIdleConns,
+		MaxIdleConnsPerHost:   maxIdleConnsPerHost,
+		IdleConnTimeout:       idleConnTimeout,
+		TLSHandshakeTimeout:   2 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+	}
+
+	// Create custom client with the transport
+	customClient := &http.Client{
+		Transport: customTransport,
+		Timeout:   responseTimeout,
+	}
 
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Body != nil {
@@ -50,7 +79,7 @@ func NewHandlerFunc(config types.FaaSConfig, resolver *handlers.InvokeResolver, 
 			http.MethodGet,
 			http.MethodOptions,
 			http.MethodHead:
-			proxyRequest(w, r, proxyClient, resolver, fs)
+			proxyRequest(w, r, customClient, resolver, fs)
 
 		default:
 			w.WriteHeader(http.StatusMethodNotAllowed)
@@ -98,7 +127,6 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 	maxRetries := 1000
 	connectionRetries := 0
 	var totalConnectTime int64
-	sleepQuantum := 1
 
 	proxyStart := time.Now()
 	connStart := time.Now()
@@ -114,6 +142,8 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 	var err error
 	fnExecStart := time.Now()
 	totalConnectTime = -1
+	backoff := baseBackoff
+
 	for connectionRetries < maxRetries {
 		connStart = time.Now()
 		proxyReq, err = buildProxyRequest(originalReq, functionAddr, pathVars["params"], bodyBytes)
@@ -122,15 +152,32 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 			return
 		}
 
-		response, err = proxyClient.Do(proxyReq.WithContext(ctx))
+		// Create a timeout context for this particular request
+		reqCtx, cancel := context.WithTimeout(ctx, responseTimeout)
+		defer cancel()
+
+		response, err = proxyClient.Do(proxyReq.WithContext(reqCtx))
 		if err != nil {
-			connectionRetries += 1
-			// log.Printf("---------------RETRY----------------------%s", err)
-			time.Sleep(time.Duration(sleepQuantum) * time.Millisecond)
+			connectionRetries++
+			log.Printf("[function_proxy] Retry %d for %s: %v", connectionRetries, functionName, err)
+			
+			// Calculate backoff with jitter
+			jitter := rand.Intn(backoff/4)
+			sleepTime := backoff + jitter
+			time.Sleep(time.Duration(sleepTime) * time.Millisecond)
+			
+			// Increase backoff for next retry (capped)
+			backoff = int(math.Min(float64(backoff*2), float64(maxBackoff)))
 		} else if response.StatusCode == 500 {
-			connectionRetries += 1
-			// log.Printf("---------------RETRY----------------------Received 500 error from function, retrying... ")
-			time.Sleep(10 * time.Duration(sleepQuantum) * time.Millisecond)
+			connectionRetries++
+			log.Printf("[function_proxy] Retry %d for %s: received 500 status", connectionRetries, functionName)
+			
+			// Use same backoff strategy for 500 errors
+			jitter := rand.Intn(backoff/4)
+			sleepTime := backoff + jitter
+			time.Sleep(time.Duration(sleepTime) * time.Millisecond)
+			
+			backoff = int(math.Min(float64(backoff*2), float64(maxBackoff)))
 		} else {
 			break
 		}

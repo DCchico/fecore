@@ -47,8 +47,6 @@ systemctl start containerd
 # Install faas-cli
 echo "Installing faas-cli..."
 curl -fSL https://cli.openfaas.com | sh
-mv faas-cli /usr/local/bin/
-ln -sf /usr/local/bin/faas-cli /usr/local/bin/faas
 
 
 # Build and install fecore
