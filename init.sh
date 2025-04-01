@@ -18,7 +18,6 @@ apt-get install -y \
 echo "Installing Redis..."
 apt-get install -y redis
 systemctl stop redis
-systemctl disable redis
 echo "Redis installed and stopped (fecore will manage it)"
 
 # Install Docker
@@ -60,7 +59,7 @@ cp fecore /usr/local/bin/ -f
 echo "Setting up OpenFaaS login..."
 cat > /usr/local/bin/openfaas-login.sh << EOL
 #!/bin/bash
-faas-cli login -g http://127.0.0.1:8080 --token-file=/var/lib/fecore/secrets/basic-auth-password
+cat /var/lib/fecore/secrets/basic-auth-password | faas-cli login -g http://127.0.0.1:8080 --password-stdin
 EOL
 chmod +x /usr/local/bin/openfaas-login.sh
 

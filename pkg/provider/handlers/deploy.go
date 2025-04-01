@@ -339,6 +339,14 @@ func getOSMounts() []specs.Mount {
 		Source:      path.Join(hostsDir, "hosts"),
 		Options:     []string{"rbind", "ro"},
 	})
+
+	// Add /dev/shm mount
+	mounts = append(mounts, specs.Mount{
+		Destination: "/dev/shm",
+		Type:        "bind",
+		Source:      "/dev/shm",
+		Options:     []string{"rbind", "rw"},
+	})
 	return mounts
 }
 
