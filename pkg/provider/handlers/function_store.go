@@ -160,7 +160,7 @@ func (fs *FunctionStore) CleanupDaemon(client *containerd.Client, cni gocni.CNI)
 	currTs := time.Now()
 	for name, fn := range fs.deployedFunctions {
 		for cn, ts := range fn.idleReplicasTs {
-			if currTs.Sub(ts).Seconds() >= 300 { // TODO 300 seconds harcoded
+			if currTs.Sub(ts).Seconds() >= 600 { // TODO 300 seconds harcoded
 				log.Println("[CleanupDaemon] Cleaning up replica :", cn)
 				delete(fs.deployedFunctions[name].idleReplicas, cn)
 				delete(fs.deployedFunctions[name].idleReplicasTs, cn)

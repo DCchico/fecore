@@ -32,8 +32,8 @@ import (
 const (
 	watchdogPort       = "8080"
 	defaultContentType = "text/plain"
-	dialTimeout        = 2 * time.Second
-	responseTimeout    = 5 * time.Second
+	dialTimeout        = 10 * time.Second
+	responseTimeout    = 10 * time.Second
 	maxIdleConns       = 100
 	maxIdleConnsPerHost = 20
 	idleConnTimeout    = 30 * time.Second
@@ -49,10 +49,18 @@ func NewHandlerFunc(config types.FaaSConfig, resolver *handlers.InvokeResolver, 
 
 	// Create a custom transport with tuned parameters
 	customTransport := &http.Transport{
-		DialContext: (&net.Dialer{
-			Timeout:   dialTimeout,
-			KeepAlive: 30 * time.Second,
-		}).DialContext,
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			start := time.Now()
+			conn, err := (&net.Dialer{
+				Timeout:   dialTimeout,
+				KeepAlive: 30 * time.Second,
+			}).DialContext(ctx, network, addr)
+			if err != nil {
+				log.Printf("[function_proxy] Connection failed to %s after %v: %v", 
+					addr, time.Since(start), err)
+			}
+			return conn, err
+		},
 		MaxIdleConns:          maxIdleConns,
 		MaxIdleConnsPerHost:   maxIdleConnsPerHost,
 		IdleConnTimeout:       idleConnTimeout,
@@ -178,6 +186,24 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 			time.Sleep(time.Duration(sleepTime) * time.Millisecond)
 			
 			backoff = int(math.Min(float64(backoff*2), float64(maxBackoff)))
+		} else if response.StatusCode == 400 {
+			log.Printf("[function_proxy] Function %s returned 400 Bad Request", functionName)
+			
+			// Read the error response body
+			if response.Body != nil {
+				responseData, err := io.ReadAll(response.Body)
+				if err != nil {
+					log.Printf("[function_proxy] Error reading 400 response: %v", err)
+				} else {
+					log.Printf("[function_proxy] Function error details: %s", string(responseData))
+				}
+				
+				// Important: Create a new reader for the body since we consumed it
+				response.Body = io.NopCloser(bytes.NewBuffer(responseData))
+			}
+			
+			// Exit the retry loop - we'll forward this response as is
+			break
 		} else {
 			break
 		}
@@ -190,9 +216,50 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 		httputil.Errorf(w, http.StatusInternalServerError, "Connection time exceeded")
 		return
 	}
-	if err != nil || response.StatusCode != 200 {
-		log.Printf("[retryProxyRequest] Unable to contact function %s at %s with status code %d and error : %s \n", functionName, ip, response.StatusCode, err)
+	if err != nil {
+		log.Printf("[retryProxyRequest] Unable to contact function %s at %s: %s\n", functionName, ip, err)
 		httputil.Errorf(w, http.StatusInternalServerError, "Can't reach service for '%s'", functionName)
+		return
+	}
+
+
+
+	// For 400 errors, pass through the response with the error details
+	if response.StatusCode == 400 {
+		log.Printf("[function_proxy] Forwarding 400 Bad Request from function %s", functionName)
+		// Update replica status regardless of response status
+		ip = strings.Split(functionAddr.Host, ":")[0]
+		if proxyReq != nil && proxyReq.URL != nil {
+			err = fs.UpdateReplicaStatusInactive(functionName, ip, requestID)
+			if err != nil {
+				log.Printf("[function_proxy] Unable to update function replica status '%s': %s\n", proxyReq.URL.String(), err.Error())
+				httputil.Errorf(w, http.StatusInternalServerError, "Can't reach service for '%s'", functionName)
+				return
+			}
+		}
+		
+		// Copy headers from function response
+		clientHeader := w.Header()
+		copyHeaders(clientHeader, &response.Header)
+		w.Header().Set("Content-Type", getContentType(originalReq.Header, response.Header))
+		w.Header().Set("Request-ID", requestID)
+		
+		// Forward the 400 status code
+		w.WriteHeader(response.StatusCode)
+		
+		// Forward the response body
+		if response.Body != nil {
+			io.Copy(w, response.Body)
+		}
+		
+		// Don't continue with normal response processing
+		return
+	}
+
+	// For other non-200 responses, return a generic error
+	if response.StatusCode != 200 {
+		log.Printf("[retryProxyRequest] Function %s returned non-200 status: %d\n", functionName, response.StatusCode)
+		httputil.Errorf(w, http.StatusInternalServerError, "Function returned status %d", response.StatusCode)
 		return
 	}
 

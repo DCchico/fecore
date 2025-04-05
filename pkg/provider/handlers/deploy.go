@@ -14,6 +14,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/containerd/containerd"
@@ -89,6 +90,7 @@ func MakeDeployHandler(client *containerd.Client, cni gocni.CNI, secretMountPath
 		fn.activeReplicas = make(map[string]string)
 		fn.idleReplicas = make(map[string]string)
 		fn.idleReplicasTs = make(map[string]time.Time)
+		fn.replicas = 1
 		// State management
 		// fn.UserToFunctionReplica = make(map[string]map[string]fecore.StickinessRecord)
 
@@ -98,7 +100,6 @@ func MakeDeployHandler(client *containerd.Client, cni gocni.CNI, secretMountPath
 			http.Error(w, deployErr.Error(), http.StatusBadRequest)
 			return
 		}
-		fn.replicas = 1
 		err = fs.AddDeployedFunction(&fn)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
@@ -218,16 +219,35 @@ func deploy(ctx context.Context, req types.FunctionDeployment, client *container
 		log.Printf("[deploy] No limits set for Function '%s', using default memory limit of %d bytes and CPU limit of %d milliCPU", fn.name, fn.memoryLimit, fn.cpuLimit)
 	}
 
-	startTime := time.Now()
-	replicaName, createReplicaStatus := createReplica(client, cni, fs, fn, "Deploy", false)
-	if createReplicaStatus == nil {
-		coldStartTime := time.Since(startTime)
-		fs.RecordColdStartTime(coldStartTime, "Deploy <"+fn.name+">")
-		log.Printf("[deploy] Created container '%s' for Function '%s'", replicaName, fn.name)
-	} else {
-		log.Printf("[deploy] Failed to create container for Function '%s'", fn.name)
+	// Get initial replica count from annotation
+	initialReplicas := 1
+	if req.Annotations != nil {
+		if val, ok := (*req.Annotations)["com.openfaas.scale.min"]; ok {
+			if count, err := strconv.Atoi(val); err == nil {
+				if count <= 0 {
+					return fmt.Errorf("initial replica count must be positive, got %d", count)
+				}
+				initialReplicas = count
+			}
+		}
 	}
-	return createReplicaStatus
+
+	// Create replicas sequentially, return on first error
+	for i := 0; i < initialReplicas; i++ {
+		replicaName, createReplicaStatus := createReplica(client, cni, fs, fn, "Deploy", false)
+		if createReplicaStatus != nil {
+			log.Printf("[deploy] Failed to create replica %d/%d for Function '%s': %s", 
+				i+1, initialReplicas, fn.name, createReplicaStatus)
+			return createReplicaStatus
+		}
+		log.Printf("[deploy] Created container '%s' for Function '%s' (%d/%d)", 
+			replicaName, fn.name, i+1, initialReplicas)
+	}
+
+	fn.replicas = initialReplicas
+	log.Printf("[deploy] Successfully created %d replicas for Function '%s'", 
+		initialReplicas, fn.name)
+	return nil
 }
 
 func buildLabels(request *types.FunctionDeployment) (map[string]string, error) {
