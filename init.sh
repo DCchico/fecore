@@ -17,8 +17,27 @@ apt-get install -y \
 # Install Redis using apt
 echo "Installing Redis..."
 apt-get install -y redis
-systemctl stop redis
-echo "Redis installed and stopped (fecore will manage it)"
+
+# Try to stop Redis service, but handle the case where it's not running
+if systemctl is-active --quiet redis; then
+    echo "Stopping Redis service..."
+    systemctl stop redis
+    systemctl disable redis
+    echo "Redis service stopped and disabled"
+else
+    echo "Redis service is not running (good!)"
+fi
+
+# Double-check no Redis is running via process check
+if pgrep redis-server > /dev/null; then
+    echo "Found Redis process, stopping it..."
+    pkill redis-server
+    echo "Redis process stopped"
+else
+    echo "No Redis process found (good!)"
+fi
+
+echo "Redis setup completed - ready for FaaSEdge Core to manage Redis"
 
 # Install Docker
 echo "Installing Docker..."

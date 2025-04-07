@@ -183,14 +183,17 @@ func createReplica(client *containerd.Client, cni gocni.CNI, fs *FunctionStore, 
 		containerd.WithImage(image),
 		containerd.WithSnapshotter(snapshotter),
 		containerd.WithNewSnapshot(name+"-snapshot", image),
-		containerd.WithNewSpec(oci.WithImageConfig(image),
+		containerd.WithNewSpec(
+			oci.WithImageConfig(image),
 			oci.WithHostname(name),
 			oci.WithCapabilities([]string{"CAP_NET_RAW"}),
 			oci.WithMounts(mounts),
 			oci.WithAnnotations(labels),
 			oci.WithEnv(envs),
 			withMemory(memory),
-			withCPU(cpu)),
+			withCPU(cpu),
+			withHostIPC(),
+		),
 		containerd.WithContainerLabels(labels),
 	)
 
@@ -375,4 +378,8 @@ func withCPU(cpu *specs.LinuxCPU) oci.SpecOpts {
 		}
 		return nil
 	}
+}
+
+func withHostIPC() oci.SpecOpts {
+	return oci.WithHostNamespace(specs.IPCNamespace)
 }
