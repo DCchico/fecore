@@ -6,6 +6,7 @@ package proxy
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"log"
 	"math"
@@ -41,6 +42,7 @@ const (
 	baseBackoff        = 50 // ms
 	maxBackoff         = 500 // ms
 )
+
 
 func NewHandlerFunc(config types.FaaSConfig, resolver *handlers.InvokeResolver, fs *handlers.FunctionStore) http.HandlerFunc {
 	if resolver == nil {
@@ -103,6 +105,7 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 	// State management: get userID
 	vDAGID := originalReq.Header.Get("vDAGID")
 	workflowID := originalReq.Header.Get("workflowID")
+	sequenceID := originalReq.Header.Get("sequence")
 	isForwardDownstream := ""
 
 	pathVars := mux.Vars(originalReq)
@@ -118,7 +121,27 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 		return
 	}
 
-	functionAddr, coldStart, resolveErr := resolver.Resolve(functionName, requestID)
+	// Check for state-location and state-dependencies headers
+	stateLocation := originalReq.Header.Get("state-location")
+	stateDependencies := originalReq.Header.Get("state-dependencies")
+
+	var dependencies []handlers.DependencyInfo
+	if stateLocation == "direct" && stateDependencies != "" {
+		log.Printf("[function_proxy] Direct state access mode detected for function %s", functionName)
+		log.Printf("[function_proxy] State dependencies: %s", stateDependencies)
+
+		// Parse state-dependencies JSON
+		err := json.Unmarshal([]byte(stateDependencies), &dependencies)
+		if err != nil {
+			log.Printf("[function_proxy] Error parsing state-dependencies: %v", err)
+		} else {
+			for _, dep := range dependencies {
+				log.Printf("[function_proxy] Dependency - SenderVDAG: %s, SenderSeq: %s", dep.SenderVDAG, dep.SenderSeq)
+			}
+		}
+	}
+
+	functionAddr, coldStart, resolveErr := resolver.Resolve(functionName, requestID, dependencies, vDAGID, sequenceID)
 	if resolveErr != nil {
 		log.Printf("resolver error: no endpoints for %s: %s\n", functionName, resolveErr.Error())
 		httputil.Errorf(w, http.StatusServiceUnavailable, "No endpoints available for: %s.", functionName)

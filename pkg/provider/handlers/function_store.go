@@ -55,6 +55,19 @@ type FunctionStore struct {
 	dfMu     sync.RWMutex
 	statsMu  sync.RWMutex
 	/* End mutexes */
+
+	// Map to store invocation details
+	invocationDetails map[string]map[string]map[string]string // functionName -> vDAGID -> sequenceID -> containerIP
+
+	// Map to store invocation details by container IP
+	invocationDetailsByIP map[string]InvocationInfo
+}
+
+// Define a struct to hold invocation information
+type InvocationInfo struct {
+	FunctionName string
+	VDAGID       string
+	SequenceID   string
 }
 
 type FunctionStats struct {
@@ -85,6 +98,8 @@ func InitFunctionStore(storageManager storage.StorageManager) (*FunctionStore, e
 		storageManager:    storageManager,
 		ipconfigs:         sync.Map{},
 		statsChan:         make(chan FunctionStat, 100),
+		invocationDetails: make(map[string]map[string]map[string]string),
+		invocationDetailsByIP: make(map[string]InvocationInfo),
 	}
 
 	sFns, err := storageManager.GetAllFunctions()
@@ -540,4 +555,63 @@ func (fs *FunctionStore) GetIdleReplicaAtomic(fn string, requestID string) (stri
 	function.activeReplicas[name] = ip
 
 	return name, ip, true, nil
+}
+
+// RecordInvocationDetails records the association between functionName, vDAGID, sequenceID, and containerIP
+func (fs *FunctionStore) RecordInvocationDetails(functionName, vDAGID, sequenceID, containerIP string) {
+	fs.dfMu.Lock()
+	defer fs.dfMu.Unlock()
+
+	if _, exists := fs.invocationDetails[functionName]; !exists {
+		fs.invocationDetails[functionName] = make(map[string]map[string]string)
+	}
+	if _, exists := fs.invocationDetails[functionName][vDAGID]; !exists {
+		fs.invocationDetails[functionName][vDAGID] = make(map[string]string)
+	}
+	fs.invocationDetails[functionName][vDAGID][sequenceID] = containerIP
+	if invocationInfo, exists := fs.invocationDetailsByIP[containerIP]; !exists {
+		fs.invocationDetailsByIP[containerIP] = InvocationInfo{
+			FunctionName: functionName,
+			VDAGID:       vDAGID,
+			SequenceID:   sequenceID,
+		}
+	} else {
+		delete(fs.invocationDetails[invocationInfo.FunctionName][invocationInfo.VDAGID], invocationInfo.SequenceID)
+		fs.invocationDetailsByIP[containerIP] = InvocationInfo{
+			FunctionName: functionName,
+			VDAGID:       vDAGID,
+			SequenceID:   sequenceID,
+		}
+	}
+}
+
+// GetInvocationDetails retrieves the container IP and status using functionName, vDAGID, and sequenceID
+func (fs *FunctionStore) GetInvocationDetails(functionName, vDAGID, sequenceID string) (string, bool) {
+	fs.dfMu.RLock()
+	defer fs.dfMu.RUnlock()
+
+	if vdagMap, exists := fs.invocationDetails[functionName]; exists {
+		if seqMap, exists := vdagMap[vDAGID]; exists {
+			if containerIP, exists := seqMap[sequenceID]; exists {
+				// Check if the container is still active
+				for _, ip := range fs.deployedFunctions[functionName].activeReplicas {
+					if ip == containerIP {
+						return containerIP, true
+					}
+				}
+				for name, ip := range fs.deployedFunctions[functionName].idleReplicas {
+					if ip == containerIP {
+						delete(fs.deployedFunctions[functionName].idleReplicas, name)
+						delete(fs.deployedFunctions[functionName].idleReplicasTs, name)
+						fs.deployedFunctions[functionName].activeReplicas[name] = ip
+						return ip, false
+					}
+				}
+				// TODO: Unknown case: containerIP is not in idleReplicas or activeReplicas
+				log.Printf("[GetInvocationDetails] Unknown case: containerIP %s is not in idleReplicas or activeReplicas", containerIP)
+				return "Unknown", false
+			}
+		}
+	}
+	return "", false
 }

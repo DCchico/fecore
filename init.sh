@@ -17,15 +17,6 @@ apt-get install -y \
 # Install Redis using apt
 echo "Installing Redis..."
 apt-get install -y redis
-systemctl stop redis
-echo "Redis installed and stopped (fecore will manage it)"
-
-# Install Docker
-echo "Installing Docker..."
-curl -fsSL https://get.docker.com -o get-docker.sh
-sh get-docker.sh
-systemctl enable docker
-systemctl start docker
 
 # Install containerd
 echo "Installing containerd..."
@@ -46,13 +37,6 @@ systemctl start containerd
 # Install faas-cli
 echo "Installing faas-cli..."
 curl -fSL https://cli.openfaas.com | sh
-
-
-# Build and install fecore
-echo "Building FaaSEdge Core..."
-cd /usr/local/src/fecore
-go build
-cp fecore /usr/local/bin/ -f
 
 
 # Login to OpenFaaS
