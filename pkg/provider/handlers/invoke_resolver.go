@@ -33,7 +33,7 @@ func NewInvokeResolver(client *containerd.Client, cni gocni.CNI, fs *FunctionSto
 	return &InvokeResolver{client: client, cni: cni, fs: fs}
 }
 
-func (i *InvokeResolver) Resolve(functionName string, requestID string, dependencies []DependencyInfo, vDAGID string, sequenceID string) (url.URL, bool, error) {
+func (i *InvokeResolver) Resolve(functionName string, requestID string, dependencies []DependencyInfo, vDAGID string, sequenceID string) (url.URL, bool, bool, error) {
 	defer timec.RecordDuration("(invoke_resolver.go) Resolve() <requestID="+requestID+">", time.Now())
 	actualFunctionName := functionName
 	log.Printf("[Resolve] Resolving <function=%q, vDAGID=%s, sequenceID=%s> (requestID=%s)\n", actualFunctionName, vDAGID, sequenceID, requestID)
@@ -55,9 +55,9 @@ func (i *InvokeResolver) Resolve(functionName string, requestID string, dependen
 				urlStr := fmt.Sprintf("http://%s:%d", replicaIP, watchdogPort)
 				urlRes, err := url.Parse(urlStr)
 				if err != nil {
-					return url.URL{}, false, err
+					return url.URL{}, false, true, err
 				}
-				return *urlRes, coldStart, nil
+				return *urlRes, coldStart, true, nil
 			} else if !isRunning && containerIP == "" {
 				log.Printf("[Resolve] Dependent container has not been executed yet - SenderVDAG: %s, SenderSeq: %s", dep.SenderVDAG, dep.SenderSeq)
 				time.Sleep(50 * time.Millisecond)
@@ -81,7 +81,7 @@ func (i *InvokeResolver) Resolve(functionName string, requestID string, dependen
 	function, er := i.fs.GetDeployedFunction(actualFunctionName, requestID)
 	if er != nil {
 		log.Printf("[Invoke] Error retrieving function '%s': %s", actualFunctionName, er)
-		return url.URL{}, false, er
+		return url.URL{}, false, false, er
 	}
 
 	var replicaName string
@@ -93,7 +93,7 @@ func (i *InvokeResolver) Resolve(functionName string, requestID string, dependen
 	replicaName, replicaIP, hasIdle, err := i.fs.GetIdleReplicaAtomic(actualFunctionName, requestID)
 	if err != nil {
 		log.Printf("[Invoke] Error retrieving idle replica for Function '%s': %s", function.name, err)
-		return url.URL{}, false, err
+		return url.URL{}, false, false, err
 	}
 
 	if hasIdle {
@@ -106,7 +106,7 @@ func (i *InvokeResolver) Resolve(functionName string, requestID string, dependen
 		replicaName, err = createReplica(i.client, i.cni, i.fs, &function, requestID, true)
 		if err != nil {
 			log.Printf("[Invoke] Error creating new replica for Function %s: %s", function.name, err)
-			return url.URL{}, false, err
+			return url.URL{}, false, false, err
 		}
 		timec.RecordDuration("(invoke_resolver.go).Resolve.[CreateReplicaTime] <requestID="+requestID+">", startTime)
 		coldStartTime := time.Since(startTime)
@@ -118,6 +118,9 @@ func (i *InvokeResolver) Resolve(functionName string, requestID string, dependen
 		log.Printf("[Invoke] Using new replica '%s' (%s) for Function '%s' <requestID=%s>", replicaName, replicaIP, function.name, requestID)
 	}
 
+	// Tag if the replica is initialized
+	isInitialized := i.fs.IsReplicaInitialized(function.name, replicaIP)
+
 	// Record the invocation details
 	i.fs.RecordInvocationDetails(functionName, vDAGID, sequenceID, replicaIP)
 	log.Printf("[Resolve] Recorded invocation dependency details for Function '%s' <vDAGID=%s, sequenceID=%s, containerIP=%s>", functionName, vDAGID, sequenceID, replicaIP)
@@ -125,10 +128,10 @@ func (i *InvokeResolver) Resolve(functionName string, requestID string, dependen
 	urlStr := fmt.Sprintf("http://%s:%d", replicaIP, watchdogPort)
 	urlRes, err := url.Parse(urlStr)
 	if err != nil {
-		return url.URL{}, false, err
+		return url.URL{}, false, false, err
 	}
 
-	return *urlRes, coldStart, nil
+	return *urlRes, coldStart, isInitialized, nil
 }
 
 func getNamespace(name, defaultNamespace string) string {

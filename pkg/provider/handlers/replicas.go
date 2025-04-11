@@ -222,6 +222,8 @@ func createReplica(client *containerd.Client, cni gocni.CNI, fs *FunctionStore, 
 		} else {
 			fn.idleReplicas[name] = ip
 		}
+		fn.replicas += 1
+		fn.coldReplicas = append(fn.coldReplicas, ip)
 		fs.dfMu.Unlock()
 		return name, nil
 	}

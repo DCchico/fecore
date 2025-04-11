@@ -318,7 +318,7 @@ func (fs *FunctionStore) AddActiveReplica(fn string, cn string, ip string, reque
 	fs.dfMu.Lock()
 	fs.deployedFunctions[fn].activeReplicas[cn] = ip
 	fs.deployedFunctions[fn].replicas += 1
-	sendReplicaUpdateAsync(fs.fecoreIP, fs.fecorePort, fs.stateflowIP, fs.stateflowPort, fn, 1)
+	sendReplicaUpdateAsync(fs.fecoreIP, fs.fecorePort, fs.stateflowIP, fs.stateflowPort, fn, fs.deployedFunctions[fn].replicas)
 	fs.dfMu.Unlock()
 
 	return nil
@@ -614,4 +614,35 @@ func (fs *FunctionStore) GetInvocationDetails(functionName, vDAGID, sequenceID s
 		}
 	}
 	return "", false
+}
+
+// contains checks if a slice contains a specific element.
+func contains(slice []string, item string) bool {
+	for _, v := range slice {
+		if v == item {
+			return true
+		}
+	}
+	return false
+}
+
+// remove removes a specific element from a slice.
+func remove(slice []string, item string) []string {
+	for i, v := range slice {
+		if v == item {
+			return append(slice[:i], slice[i+1:]...)
+		}
+	}
+	return slice
+}
+
+func (fs *FunctionStore) IsReplicaInitialized(fn string, replicaIP string) bool {
+	fs.dfMu.Lock()
+	defer fs.dfMu.Unlock()
+
+	if contains(fs.deployedFunctions[fn].coldReplicas, replicaIP) {
+		fs.deployedFunctions[fn].coldReplicas = remove(fs.deployedFunctions[fn].coldReplicas, replicaIP)
+		return false
+	}
+	return true
 }

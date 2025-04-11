@@ -141,7 +141,7 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 		}
 	}
 
-	functionAddr, coldStart, resolveErr := resolver.Resolve(functionName, requestID, dependencies, vDAGID, sequenceID)
+	functionAddr, coldStart, isInitialized, resolveErr := resolver.Resolve(functionName, requestID, dependencies, vDAGID, sequenceID)
 	if resolveErr != nil {
 		log.Printf("resolver error: no endpoints for %s: %s\n", functionName, resolveErr.Error())
 		httputil.Errorf(w, http.StatusServiceUnavailable, "No endpoints available for: %s.", functionName)
@@ -323,6 +323,7 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 		copyHeaders(clientHeader, &response.Header)
 		w.Header().Set("Content-Type", getContentType(originalReq.Header, response.Header))
 		w.Header().Set("Request-ID", requestID)
+		w.Header().Set("isInitialized", strconv.FormatBool(isInitialized))
 
 		w.WriteHeader(response.StatusCode)
 		if response.Body != nil {

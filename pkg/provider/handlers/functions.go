@@ -22,6 +22,7 @@ type Function struct {
 	imageFiles     []string
 	pid            map[string]uint32
 	replicas       int
+	coldReplicas   []string // replicas that have not been initialized yet
 	activeReplicas map[string]string
 	idleReplicas   map[string]string
 	idleReplicasTs map[string]time.Time

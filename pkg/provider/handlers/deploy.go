@@ -240,6 +240,7 @@ func deploy(ctx context.Context, req types.FunctionDeployment, client *container
 				i+1, initialReplicas, fn.name, createReplicaStatus)
 			return createReplicaStatus
 		}
+		sendReplicaUpdateAsync(fs.fecoreIP, fs.fecorePort, fs.stateflowIP, fs.stateflowPort, fn.name, initialReplicas)
 		log.Printf("[deploy] Created container '%s' for Function '%s' (%d/%d)", 
 			replicaName, fn.name, i+1, initialReplicas)
 	}
