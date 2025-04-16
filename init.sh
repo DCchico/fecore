@@ -39,13 +39,6 @@ fi
 
 echo "Redis setup completed - ready for FaaSEdge Core to manage Redis"
 
-# Install Docker
-echo "Installing Docker..."
-curl -fsSL https://get.docker.com -o get-docker.sh
-sh get-docker.sh
-systemctl enable docker
-systemctl start docker
-
 # Install containerd
 echo "Installing containerd..."
 # Using instructions from faasd docs
