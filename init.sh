@@ -11,6 +11,7 @@ apt-get install -y \
   curl \
   wget \
   build-essential \
+  python3-pip \
   net-tools \
   sudo
 

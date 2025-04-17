@@ -220,7 +220,6 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 				} else {
 					log.Printf("[function_proxy] Function error details: %s", string(responseData))
 				}
-				
 				// Important: Create a new reader for the body since we consumed it
 				response.Body = io.NopCloser(bytes.NewBuffer(responseData))
 			}
@@ -335,7 +334,7 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 // buildProxyRequest creates a request object for the proxy request, it will ensure that
 // the original request headers are preserved as well as setting openfaas system headers
 func buildProxyRequest(originalReq *http.Request, baseURL url.URL, extraPath string, body []byte) (*http.Request, error) {
-
+	
 	host := baseURL.Host
 	if baseURL.Port() == "" {
 		host = baseURL.Host + ":" + watchdogPort
@@ -350,8 +349,10 @@ func buildProxyRequest(originalReq *http.Request, baseURL url.URL, extraPath str
 
 	upstreamReq, err := http.NewRequest(originalReq.Method, url.String(), bytes.NewReader(body))
 	if err != nil {
+		log.Printf("[ERROR] Failed to create new request: %v", err)
 		return nil, err
 	}
+	
 	copyHeaders(upstreamReq.Header, &originalReq.Header)
 
 	if len(originalReq.Host) > 0 && upstreamReq.Header.Get("X-Forwarded-Host") == "" {
