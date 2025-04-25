@@ -65,7 +65,8 @@ curl -fSL https://cli.openfaas.com | sh
 echo "Setting up OpenFaaS login..."
 cat > /usr/local/bin/openfaas-login.sh << EOL
 #!/bin/bash
-sudo cat /var/lib/fecore/secrets/basic-auth-password | faas-cli login -g http://127.0.0.1:8080 --password-stdin
+sudo cat /var/lib/fecore/secrets/basic-auth-password | faas-cli login -g http://127.0.0.1:8081 --password-stdin
+export OPENFAAS_URL=http://127.0.0.1:8081
 EOL
 chmod +x /usr/local/bin/openfaas-login.sh
 

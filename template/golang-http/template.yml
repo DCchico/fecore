@@ -1,0 +1,7 @@
+language: golang-http
+fprocess: ./handler
+welcome_message: |
+  This template is now deprecated, use the golang-middleware
+  template instead.
+
+  https://docs.openfaas.com/languages/go/
