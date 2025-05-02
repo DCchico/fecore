@@ -156,6 +156,16 @@ func deploy(ctx context.Context, req types.FunctionDeployment, client *container
 		return fmt.Errorf("[deploy] Unable to build labels for Function '%s': %w", fn.name, err)
 	}
 
+	// Check if function needs dedicated core
+	needsDedicatedCore := false
+	if req.Annotations != nil {
+		if val, ok := (*req.Annotations)["com.openfaas.cpu.dedicated"]; ok {
+			if dedicated, err := strconv.ParseBool(val); err == nil {
+				needsDedicatedCore = dedicated
+			}
+		}
+	}
+
 	// TODO use container image to extra wasm data
 	// Currenly hack is to specify the tar path as image url
 	if val, ok := labels["module.wasm.image/variant"]; ok && (val == "compat-smart" || val == "compat") {
@@ -184,6 +194,11 @@ func deploy(ctx context.Context, req types.FunctionDeployment, client *container
 	fn.envProcess = req.EnvProcess
 	fn.envVars = req.EnvVars
 	fn.labels = labels
+
+	// Add dedicated core information to labels
+	if needsDedicatedCore {
+		fn.labels["com.openfaas.cpu.dedicated"] = "true"
+	}
 
 	if req.Limits != nil {
 		if len(req.Limits.Memory) > 0 {

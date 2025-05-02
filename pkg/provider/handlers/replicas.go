@@ -175,27 +175,73 @@ func createReplica(client *containerd.Client, cni gocni.CNI, fs *FunctionStore, 
 		}
 	}
 
-	log.Printf("[createReplica] Creating new container for Function '%s' with memory limit: %d bytes, CPU limit: %d milliCPU", name, fn.memoryLimit, fn.cpuLimit)
-	container, err := client.NewContainer(
-		ctx,
-		name,
-		requestID,
-		containerd.WithImage(image),
-		containerd.WithSnapshotter(snapshotter),
-		containerd.WithNewSnapshot(name+"-snapshot", image),
-		containerd.WithNewSpec(
-			oci.WithImageConfig(image),
-			oci.WithHostname(name),
-			oci.WithCapabilities([]string{"CAP_NET_RAW"}),
-			oci.WithMounts(mounts),
-			oci.WithAnnotations(labels),
-			oci.WithEnv(envs),
-			withMemory(memory),
-			withCPU(cpu),
-			withHostIPC(),
-		),
-		containerd.WithContainerLabels(labels),
-	)
+	// Get available CPUs from environment variable or use default
+	var cpuSet string
+	var useCPUSet bool = false
+	
+	// Check if function needs dedicated core
+	if val, ok := fn.labels["com.openfaas.cpu.dedicated"]; ok && val == "true" {
+		// Use cores 4-11 for dedicated functions
+		// We'll use a simple round-robin approach to assign cores
+		// This ensures different replicas of the same function get different cores
+		dedicatedCore := 4 + (fn.replicas % 8) // 8 cores from 4-11
+		cpuSet = strconv.Itoa(dedicatedCore)
+		useCPUSet = true
+		log.Printf("[createReplica] Assigning dedicated core %d to function '%s'", dedicatedCore, fn.name)
+	} else if val, ok := os.LookupEnv("FECORE_CPU_SET"); ok {
+		cpuSet = val
+	}
+
+	log.Printf("[createReplica] Creating new container for Function '%s' with memory limit: %d bytes, CPU limit: %d milliCPU, CPU set: %s", 
+		name, fn.memoryLimit, fn.cpuLimit, cpuSet)
+
+	var container containerd.Container
+		// Only add CPU affinity if needed
+	if useCPUSet {
+		container, err = client.NewContainer(
+			ctx,
+			name,
+			requestID,
+			containerd.WithImage(image),
+			containerd.WithSnapshotter(snapshotter),
+			containerd.WithNewSnapshot(name+"-snapshot", image),
+			containerd.WithNewSpec(
+				oci.WithImageConfig(image),
+				oci.WithHostname(name),
+				oci.WithCapabilities([]string{"CAP_NET_RAW"}),
+				oci.WithMounts(mounts),
+				oci.WithAnnotations(labels),
+				oci.WithEnv(envs),
+				withMemory(memory),
+				withCPU(cpu),
+				withCPUSet(cpuSet),
+				withHostIPC(),
+			),
+			containerd.WithContainerLabels(labels),
+		)
+	} else {
+		container, err = client.NewContainer(
+			ctx,
+			name,
+			requestID,
+			containerd.WithImage(image),
+			containerd.WithSnapshotter(snapshotter),
+			containerd.WithNewSnapshot(name+"-snapshot", image),
+			containerd.WithNewSpec(
+				oci.WithImageConfig(image),
+				oci.WithHostname(name),
+				oci.WithCapabilities([]string{"CAP_NET_RAW"}),
+				oci.WithMounts(mounts),
+				oci.WithAnnotations(labels),
+				oci.WithEnv(envs),
+				withMemory(memory),
+				withCPU(cpu),
+				withHostIPC(),
+			),
+			containerd.WithContainerLabels(labels),
+		)
+	}
+
 
 	if err != nil {
 		return "", fmt.Errorf("[createReplica] Unable to create container '%s': %w", name, err)
@@ -378,6 +424,23 @@ func withCPU(cpu *specs.LinuxCPU) oci.SpecOpts {
 			}
 			s.Linux.Resources.CPU = cpu
 		}
+		return nil
+	}
+}
+
+// withCPUSet sets CPU affinity for the container
+func withCPUSet(cpus string) oci.SpecOpts {
+	return func(ctx context.Context, _ oci.Client, c *containers.Container, s *oci.Spec) error {
+		if s.Linux == nil {
+			s.Linux = &specs.Linux{}
+		}
+		if s.Linux.Resources == nil {
+			s.Linux.Resources = &specs.LinuxResources{}
+		}
+		if s.Linux.Resources.CPU == nil {
+			s.Linux.Resources.CPU = &specs.LinuxCPU{}
+		}
+		s.Linux.Resources.CPU.Cpus = cpus
 		return nil
 	}
 }
