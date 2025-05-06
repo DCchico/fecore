@@ -56,6 +56,20 @@ systemctl daemon-reload
 systemctl enable containerd
 systemctl start containerd
 
+# CPU Throttling
+# Core CPU frequency control tools
+sudo apt-get install -y linux-tools-common linux-tools-generic
+# Specific kernel version tools (for kernel 5.15.0-113)
+sudo apt-get install -y linux-tools-5.15.0-113-generic linux-cloud-tools-5.15.0-113-generic
+# Set performance governor for all CPUs
+sudo cpupower frequency-set -g performance
+# Attempted to set fixed frequency (2.6GHz)
+sudo cpupower frequency-set -f 2.6GHz
+# Set frequency limits (min and max to 2.6GHz)
+sudo cpupower frequency-set -d 2.6GHz -u 2.6GHz
+# Direct governor setting
+echo "performance" | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor
+
 # Install faas-cli
 echo "Installing faas-cli..."
 curl -fSL https://cli.openfaas.com | sh

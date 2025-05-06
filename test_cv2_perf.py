@@ -6,6 +6,13 @@ import psutil
 import argparse
 from concurrent.futures import ProcessPoolExecutor
 
+def get_cpu_freq(core):
+    try:
+        with open(f'/sys/devices/system/cpu/cpu{core}/cpufreq/scaling_cur_freq', 'r') as f:
+            return int(f.read().strip()) / 1000  # Convert to MHz
+    except:
+        return None
+
 def set_cpu_affinity(core):
     p = psutil.Process()
     p.cpu_affinity([core])
@@ -24,24 +31,33 @@ def test_encode(image_path, core=None, num_iterations=100):
     for _ in range(5):
         cv2.imencode('.jpg', img)[1]
     
-    # Measure encoding time
+    # Measure encoding time and CPU frequency
     times = []
+    freqs = []
     for _ in range(num_iterations):
+        freq = get_cpu_freq(core) if core is not None else None
         start = time.perf_counter()
         cv2.imencode('.jpg', img)[1]
         end = time.perf_counter()
         times.append((end - start) * 1000)  # Convert to milliseconds
+        if freq is not None:
+            freqs.append(freq)
     
-    return times
+    return times, freqs
 
 def run_sequential_test(image_path, core, num_iterations):
     print(f"\nRunning sequential test on core {core}")
-    times = test_encode(image_path, core, num_iterations)
+    times, freqs = test_encode(image_path, core, num_iterations)
     avg_time = sum(times) / len(times)
+    avg_freq = sum(freqs) / len(freqs) if freqs else None
     print(f"Average encoding time: {avg_time:.2f}ms")
     print(f"Min time: {min(times):.2f}ms")
     print(f"Max time: {max(times):.2f}ms")
-    return avg_time
+    if avg_freq:
+        print(f"Average CPU frequency: {avg_freq:.2f}MHz")
+        print(f"Min frequency: {min(freqs):.2f}MHz")
+        print(f"Max frequency: {max(freqs):.2f}MHz")
+    return avg_time, avg_freq
 
 def run_parallel_test(image_path, num_parallel, num_iterations):
     # Use cores 4-11 for testing
@@ -59,17 +75,27 @@ def run_parallel_test(image_path, num_parallel, num_iterations):
     
     print("\nResults for each core:")
     avg_times = []
-    for core, times in zip(cores, results):
+    avg_freqs = []
+    for core, (times, freqs) in zip(cores, results):
         avg_time = sum(times) / len(times)
+        avg_freq = sum(freqs) / len(freqs) if freqs else None
         avg_times.append(avg_time)
+        if avg_freq:
+            avg_freqs.append(avg_freq)
         print(f"\nCore {core}:")
         print(f"Average encoding time: {avg_time:.2f}ms")
         print(f"Min time: {min(times):.2f}ms")
         print(f"Max time: {max(times):.2f}ms")
+        if avg_freq:
+            print(f"Average CPU frequency: {avg_freq:.2f}MHz")
+            print(f"Min frequency: {min(freqs):.2f}MHz")
+            print(f"Max frequency: {max(freqs):.2f}MHz")
     
     print(f"\nTotal execution time: {total_time:.2f} seconds")
     print(f"Average time per core: {sum(avg_times)/len(avg_times):.2f}ms")
-    return avg_times
+    if avg_freqs:
+        print(f"Average frequency across cores: {sum(avg_freqs)/len(avg_freqs):.2f}MHz")
+    return avg_times, avg_freqs
 
 def main():
     parser = argparse.ArgumentParser(description='Test CV2 encoding performance')
@@ -86,10 +112,10 @@ def main():
     args = parser.parse_args()
     
     if args.mode in ['sequential', 'both']:
-        seq_time = run_sequential_test(args.image_path, args.core, args.iterations)
+        seq_time, seq_freq = run_sequential_test(args.image_path, args.core, args.iterations)
     
     if args.mode in ['parallel', 'both']:
-        par_times = run_parallel_test(args.image_path, args.parallel, args.iterations)
+        par_times, par_freqs = run_parallel_test(args.image_path, args.parallel, args.iterations)
         
         if args.mode == 'both':
             avg_par_time = sum(par_times) / len(par_times)
@@ -97,6 +123,12 @@ def main():
             print(f"Sequential (core {args.core}): {seq_time:.2f}ms")
             print(f"Parallel (average): {avg_par_time:.2f}ms")
             print(f"Speedup: {seq_time/avg_par_time:.2f}x")
+            if seq_freq and par_freqs:
+                avg_par_freq = sum(par_freqs) / len(par_freqs)
+                print(f"\nFrequency comparison:")
+                print(f"Sequential frequency: {seq_freq:.2f}MHz")
+                print(f"Parallel average frequency: {avg_par_freq:.2f}MHz")
+                print(f"Frequency difference: {abs(seq_freq - avg_par_freq):.2f}MHz")
 
 if __name__ == "__main__":
-    main() 
+    main()

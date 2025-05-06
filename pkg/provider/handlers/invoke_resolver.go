@@ -33,7 +33,7 @@ func NewInvokeResolver(client *containerd.Client, cni gocni.CNI, fs *FunctionSto
 	return &InvokeResolver{client: client, cni: cni, fs: fs}
 }
 
-func (i *InvokeResolver) Resolve(functionName string, requestID string, dependencies []DependencyInfo, vDAGID string, sequenceID string) (url.URL, bool, bool, error) {
+func (i *InvokeResolver) Resolve(functionName string, requestID string, dependencies []DependencyInfo, vDAGID string, sequenceID string, releaseLocalState bool) (url.URL, bool, bool, error) {
 	defer timec.RecordDuration("(invoke_resolver.go) Resolve() <requestID="+requestID+">", time.Now())
 	actualFunctionName := functionName
 	log.Printf("[Resolve] Resolving <function=%q, vDAGID=%s, sequenceID=%s> (requestID=%s)\n", actualFunctionName, vDAGID, sequenceID, requestID)
@@ -49,7 +49,7 @@ func (i *InvokeResolver) Resolve(functionName string, requestID string, dependen
 				// Use the idle container
 				replicaIP := containerIP
 				coldStart := false
-				i.fs.RecordInvocationDetails(functionName, vDAGID, sequenceID, replicaIP)
+				i.fs.RecordInvocationDetails(functionName, vDAGID, sequenceID, replicaIP, releaseLocalState)
 				log.Printf("[Resolve] Recorded invocation dependency details for Function '%s' <vDAGID=%s, sequenceID=%s, containerIP=%s>", functionName, vDAGID, sequenceID, replicaIP)
 
 				urlStr := fmt.Sprintf("http://%s:%d", replicaIP, watchdogPort)
@@ -122,7 +122,7 @@ func (i *InvokeResolver) Resolve(functionName string, requestID string, dependen
 	isInitialized := i.fs.IsReplicaInitialized(function.name, replicaIP)
 
 	// Record the invocation details
-	i.fs.RecordInvocationDetails(functionName, vDAGID, sequenceID, replicaIP)
+	i.fs.RecordInvocationDetails(functionName, vDAGID, sequenceID, replicaIP, releaseLocalState)
 	log.Printf("[Resolve] Recorded invocation dependency details for Function '%s' <vDAGID=%s, sequenceID=%s, containerIP=%s>", functionName, vDAGID, sequenceID, replicaIP)
 
 	urlStr := fmt.Sprintf("http://%s:%d", replicaIP, watchdogPort)

@@ -61,6 +61,8 @@ type FunctionStore struct {
 
 	// Map to store invocation details by container IP
 	invocationDetailsByIP map[string]InvocationInfo
+
+	dependentContainers []string // Dependent containers by IP
 }
 
 // Define a struct to hold invocation information
@@ -544,9 +546,17 @@ func (fs *FunctionStore) GetIdleReplicaAtomic(fn string, requestID string) (stri
 	var name string
 	var ip string
 	for k, v := range function.idleReplicas {
-		name = k
 		ip = v
-		break
+		if contains(fs.dependentContainers, ip) {
+			continue
+		} else {
+			name = k
+			break
+		}
+	}
+	
+	if name == "" {
+		return "", "", false, nil
 	}
 
 	// Move replica from idle to active
@@ -558,7 +568,7 @@ func (fs *FunctionStore) GetIdleReplicaAtomic(fn string, requestID string) (stri
 }
 
 // RecordInvocationDetails records the association between functionName, vDAGID, sequenceID, and containerIP
-func (fs *FunctionStore) RecordInvocationDetails(functionName, vDAGID, sequenceID, containerIP string) {
+func (fs *FunctionStore) RecordInvocationDetails(functionName, vDAGID, sequenceID, containerIP string, releaseLocalState bool) {
 	fs.dfMu.Lock()
 	defer fs.dfMu.Unlock()
 
@@ -568,27 +578,24 @@ func (fs *FunctionStore) RecordInvocationDetails(functionName, vDAGID, sequenceI
 	if _, exists := fs.invocationDetails[functionName][vDAGID]; !exists {
 		fs.invocationDetails[functionName][vDAGID] = make(map[string]string)
 	}
+
 	fs.invocationDetails[functionName][vDAGID][sequenceID] = containerIP
-	if invocationInfo, exists := fs.invocationDetailsByIP[containerIP]; !exists {
-		fs.invocationDetailsByIP[containerIP] = InvocationInfo{
-			FunctionName: functionName,
-			VDAGID:       vDAGID,
-			SequenceID:   sequenceID,
-		}
-	} else {
-		delete(fs.invocationDetails[invocationInfo.FunctionName][invocationInfo.VDAGID], invocationInfo.SequenceID)
-		fs.invocationDetailsByIP[containerIP] = InvocationInfo{
-			FunctionName: functionName,
-			VDAGID:       vDAGID,
-			SequenceID:   sequenceID,
+	fs.invocationDetailsByIP[containerIP] = InvocationInfo{
+		FunctionName: functionName,
+		VDAGID:       vDAGID,
+		SequenceID:   sequenceID,
+	}
+	if releaseLocalState {
+		if contains(fs.dependentContainers, containerIP) {
+			remove(fs.dependentContainers, containerIP)
 		}
 	}
 }
 
 // GetInvocationDetails retrieves the container IP and status using functionName, vDAGID, and sequenceID
 func (fs *FunctionStore) GetInvocationDetails(functionName, vDAGID, sequenceID string) (string, bool) {
-	fs.dfMu.RLock()
-	defer fs.dfMu.RUnlock()
+	fs.dfMu.Lock()
+	defer fs.dfMu.Unlock()
 
 	if vdagMap, exists := fs.invocationDetails[functionName]; exists {
 		if seqMap, exists := vdagMap[vDAGID]; exists {
@@ -601,9 +608,11 @@ func (fs *FunctionStore) GetInvocationDetails(functionName, vDAGID, sequenceID s
 				}
 				for name, ip := range fs.deployedFunctions[functionName].idleReplicas {
 					if ip == containerIP {
+						delete(fs.invocationDetails[functionName][vDAGID], sequenceID)
 						delete(fs.deployedFunctions[functionName].idleReplicas, name)
 						delete(fs.deployedFunctions[functionName].idleReplicasTs, name)
 						fs.deployedFunctions[functionName].activeReplicas[name] = ip
+						fs.dependentContainers = append(fs.dependentContainers, ip)
 						return ip, false
 					}
 				}

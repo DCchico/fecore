@@ -124,6 +124,12 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 	// Check for state-location and state-dependencies headers
 	stateLocation := originalReq.Header.Get("state-location")
 	stateDependencies := originalReq.Header.Get("state-dependencies")
+	dependentStateLocation := originalReq.Header.Get("dependent-state-location")
+
+	var releaseLocalState bool = false
+	if dependentStateLocation == "direct" && stateLocation != "shared_memory" {
+		releaseLocalState = true
+	}
 
 	var dependencies []handlers.DependencyInfo
 	if stateLocation == "direct" && stateDependencies != "" {
@@ -141,7 +147,7 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 		}
 	}
 
-	functionAddr, coldStart, isInitialized, resolveErr := resolver.Resolve(functionName, requestID, dependencies, vDAGID, sequenceID)
+	functionAddr, coldStart, isInitialized, resolveErr := resolver.Resolve(functionName, requestID, dependencies, vDAGID, sequenceID, releaseLocalState)
 	if resolveErr != nil {
 		log.Printf("resolver error: no endpoints for %s: %s\n", functionName, resolveErr.Error())
 		httputil.Errorf(w, http.StatusServiceUnavailable, "No endpoints available for: %s.", functionName)
