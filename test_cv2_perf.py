@@ -59,6 +59,41 @@ def run_sequential_test(image_path, core, num_iterations):
         print(f"Max frequency: {max(freqs):.2f}MHz")
     return avg_time, avg_freq
 
+def run_colocated_sequential_test(image_path, core, num_iterations):
+    print(f"\nRunning colocated sequential tests on core {core}")
+    start_time = time.time()
+    
+    with ProcessPoolExecutor(max_workers=2) as executor:
+        futures = [executor.submit(test_encode, image_path, core, num_iterations) for _ in range(2)]
+        results = [f.result() for f in futures]
+    
+    end_time = time.time()
+    total_time = end_time - start_time
+    
+    print("\nResults for each process:")
+    avg_times = []
+    avg_freqs = []
+    for i, (times, freqs) in enumerate(results):
+        avg_time = sum(times) / len(times)
+        avg_freq = sum(freqs) / len(freqs) if freqs else None
+        avg_times.append(avg_time)
+        if avg_freq:
+            avg_freqs.append(avg_freq)
+        print(f"\nProcess {i+1}:")
+        print(f"Average encoding time: {avg_time:.2f}ms")
+        print(f"Min time: {min(times):.2f}ms")
+        print(f"Max time: {max(times):.2f}ms")
+        if avg_freq:
+            print(f"Average CPU frequency: {avg_freq:.2f}MHz")
+            print(f"Min frequency: {min(freqs):.2f}MHz")
+            print(f"Max frequency: {max(freqs):.2f}MHz")
+    
+    print(f"\nTotal execution time: {total_time:.2f} seconds")
+    print(f"Average time per process: {sum(avg_times)/len(avg_times):.2f}ms")
+    if avg_freqs:
+        print(f"Average frequency across processes: {sum(avg_freqs)/len(avg_freqs):.2f}MHz")
+    return avg_times, avg_freqs
+
 def run_parallel_test(image_path, num_parallel, num_iterations):
     # Use cores 4-11 for testing
     cores = list(range(4, 4 + num_parallel))
@@ -100,10 +135,10 @@ def run_parallel_test(image_path, num_parallel, num_iterations):
 def main():
     parser = argparse.ArgumentParser(description='Test CV2 encoding performance')
     parser.add_argument('image_path', help='Path to the image file')
-    parser.add_argument('--mode', choices=['sequential', 'parallel', 'both'], default='both',
-                      help='Test mode: sequential, parallel, or both')
+    parser.add_argument('--mode', choices=['sequential', 'parallel', 'colocated', 'all'], default='all',
+                      help='Test mode: sequential, parallel, colocated, or all')
     parser.add_argument('--core', type=int, default=4,
-                      help='Core number for sequential test (default: 4)')
+                      help='Core number for sequential/colocated tests (default: 4)')
     parser.add_argument('--parallel', type=int, default=4,
                       help='Number of parallel processes (default: 4)')
     parser.add_argument('--iterations', type=int, default=100,
@@ -111,24 +146,42 @@ def main():
     
     args = parser.parse_args()
     
-    if args.mode in ['sequential', 'both']:
-        seq_time, seq_freq = run_sequential_test(args.image_path, args.core, args.iterations)
+    results = {}
     
-    if args.mode in ['parallel', 'both']:
+    if args.mode in ['sequential', 'all']:
+        seq_time, seq_freq = run_sequential_test(args.image_path, args.core, args.iterations)
+        results['sequential'] = (seq_time, seq_freq)
+    
+    if args.mode in ['colocated', 'all']:
+        col_times, col_freqs = run_colocated_sequential_test(args.image_path, args.core, args.iterations)
+        results['colocated'] = (sum(col_times)/len(col_times), sum(col_freqs)/len(col_freqs) if col_freqs else None)
+    
+    if args.mode in ['parallel', 'all']:
         par_times, par_freqs = run_parallel_test(args.image_path, args.parallel, args.iterations)
+        results['parallel'] = (sum(par_times)/len(par_times), sum(par_freqs)/len(par_freqs) if par_freqs else None)
+    
+    if len(results) > 1:
+        print("\nPerformance comparison:")
+        for mode, (time, freq) in results.items():
+            print(f"{mode.capitalize()}: {time:.2f}ms")
+            if freq:
+                print(f"{mode.capitalize()} frequency: {freq:.2f}MHz")
         
-        if args.mode == 'both':
-            avg_par_time = sum(par_times) / len(par_times)
-            print(f"\nPerformance comparison:")
-            print(f"Sequential (core {args.core}): {seq_time:.2f}ms")
-            print(f"Parallel (average): {avg_par_time:.2f}ms")
-            print(f"Speedup: {seq_time/avg_par_time:.2f}x")
-            if seq_freq and par_freqs:
-                avg_par_freq = sum(par_freqs) / len(par_freqs)
-                print(f"\nFrequency comparison:")
-                print(f"Sequential frequency: {seq_freq:.2f}MHz")
-                print(f"Parallel average frequency: {avg_par_freq:.2f}MHz")
-                print(f"Frequency difference: {abs(seq_freq - avg_par_freq):.2f}MHz")
+        # Calculate speedups
+        if 'sequential' in results and 'parallel' in results:
+            seq_time = results['sequential'][0]
+            par_time = results['parallel'][0]
+            print(f"\nParallel vs Sequential speedup: {seq_time/par_time:.2f}x")
+        
+        if 'sequential' in results and 'colocated' in results:
+            seq_time = results['sequential'][0]
+            col_time = results['colocated'][0]
+            print(f"Colocated vs Sequential speedup: {seq_time/col_time:.2f}x")
+        
+        if 'colocated' in results and 'parallel' in results:
+            col_time = results['colocated'][0]
+            par_time = results['parallel'][0]
+            print(f"Parallel vs Colocated speedup: {col_time/par_time:.2f}x")
 
 if __name__ == "__main__":
     main()
