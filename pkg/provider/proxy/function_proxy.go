@@ -147,7 +147,9 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 		}
 	}
 
-	functionAddr, coldStart, isInitialized, resolveErr := resolver.Resolve(functionName, requestID, dependencies, vDAGID, sequenceID, releaseLocalState)
+	dataCentricDependency := originalReq.Header.Get("data-centric-dependency")
+
+	functionAddr, coldStart, isInitialized, resolveErr := resolver.Resolve(functionName, requestID, dependencies, vDAGID, sequenceID, releaseLocalState, dataCentricDependency)
 	if resolveErr != nil {
 		log.Printf("resolver error: no endpoints for %s: %s\n", functionName, resolveErr.Error())
 		httputil.Errorf(w, http.StatusServiceUnavailable, "No endpoints available for: %s.", functionName)

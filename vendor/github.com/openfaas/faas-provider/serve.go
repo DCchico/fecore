@@ -43,14 +43,14 @@ func Serve(handlers *types.FaaSHandlers, config *types.FaaSConfig) {
 			log.Fatal(err)
 		}
 
-		handlers.FunctionReader = auth.DecorateWithBasicAuth(handlers.FunctionReader, credentials)
+		// handlers.FunctionReader = auth.DecorateWithBasicAuth(handlers.FunctionReader, credentials)
 		// handlers.DeployHandler = auth.DecorateWithBasicAuth(handlers.DeployHandler, credentials)
 		// handlers.DeleteHandler = auth.DecorateWithBasicAuth(handlers.DeleteHandler, credentials)
-		handlers.UpdateHandler = auth.DecorateWithBasicAuth(handlers.UpdateHandler, credentials)
-		handlers.ReplicaReader = auth.DecorateWithBasicAuth(handlers.ReplicaReader, credentials)
-		handlers.ReplicaUpdater = auth.DecorateWithBasicAuth(handlers.ReplicaUpdater, credentials)
-		handlers.InfoHandler = auth.DecorateWithBasicAuth(handlers.InfoHandler, credentials)
-		handlers.SecretHandler = auth.DecorateWithBasicAuth(handlers.SecretHandler, credentials)
+		// handlers.UpdateHandler = auth.DecorateWithBasicAuth(handlers.UpdateHandler, credentials)
+		// handlers.ReplicaReader = auth.DecorateWithBasicAuth(handlers.ReplicaReader, credentials)
+		// handlers.ReplicaUpdater = auth.DecorateWithBasicAuth(handlers.ReplicaUpdater, credentials)
+		// handlers.InfoHandler = auth.DecorateWithBasicAuth(handlers.InfoHandler, credentials)
+		// handlers.SecretHandler = auth.DecorateWithBasicAuth(handlers.SecretHandler, credentials)
 		handlers.LogHandler = auth.DecorateWithBasicAuth(handlers.LogHandler, credentials)
 	}
 

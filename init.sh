@@ -31,6 +31,7 @@ apt-get install -y \
   sudo \
   libgl1-mesa-glx \
   libglib2.0-0 \
+  libc6-dev \
   msr-tools
 
 pip3 install psutil numpy opencv-python

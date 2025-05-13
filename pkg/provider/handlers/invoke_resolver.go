@@ -11,9 +11,12 @@ import (
 	gocni "github.com/containerd/go-cni"
 	fecore "github.gatech.edu/faasedge/fecore/pkg"
 	"github.gatech.edu/faasedge/fecore/pkg/timec"
+	"github.gatech.edu/faasedge/fecore/pkg/semaphore"
 )
 
 const watchdogPort = 8080
+
+
 
 type InvokeResolver struct {
 	client *containerd.Client
@@ -29,11 +32,33 @@ type DependencyInfo struct {
 	FecorePort   string    `json:"fecore_port"`
 }
 
+// DataCentricDependency represents the parsed data-centric dependency information
+type DataCentricDependency struct {
+	SenderVDAG  string
+	SenderSeq   string
+	Key         string
+}
+
+func parseDataCentricDependency(dep string) (*DataCentricDependency, error) {
+	parts := strings.Split(dep, "+")
+	if len(parts) != 5 {
+		return nil, fmt.Errorf("invalid data-centric dependency format: expected 5 parts, got %d", len(parts))
+	}
+	
+	return &DataCentricDependency{
+		SenderVDAG: parts[1],
+		SenderSeq:  parts[2],
+		Key:        parts[4],
+	}, nil
+}
+
 func NewInvokeResolver(client *containerd.Client, cni gocni.CNI, fs *FunctionStore) *InvokeResolver {
 	return &InvokeResolver{client: client, cni: cni, fs: fs}
 }
 
-func (i *InvokeResolver) Resolve(functionName string, requestID string, dependencies []DependencyInfo, vDAGID string, sequenceID string, releaseLocalState bool) (url.URL, bool, bool, error) {
+func (i *InvokeResolver) Resolve(functionName string, requestID string, dependencies []DependencyInfo, vDAGID string, 
+	sequenceID string, releaseLocalState bool, dataCentricDependency string) (url.URL, bool, bool, error) {
+
 	defer timec.RecordDuration("(invoke_resolver.go) Resolve() <requestID="+requestID+">", time.Now())
 	actualFunctionName := functionName
 	log.Printf("[Resolve] Resolving <function=%q, vDAGID=%s, sequenceID=%s> (requestID=%s)\n", actualFunctionName, vDAGID, sequenceID, requestID)
@@ -69,7 +94,60 @@ func (i *InvokeResolver) Resolve(functionName string, requestID string, dependen
 				time.Sleep(3 * time.Millisecond)
 			}
 		}
+	} else if dataCentricDependency != "" {
+		log.Printf("[Resolve] Handling data-centric dependency - dataCentricDependency: %s", dataCentricDependency)
+		var sem *semaphore.Semaphore
+		var err error
+		// Parse the data-centric dependency string
+		dep, err := parseDataCentricDependency(dataCentricDependency)
+		if err != nil {
+			log.Printf("[Resolve] Error parsing data-centric dependency: %v", err)
+			return url.URL{}, false, false, err
+		}
+
+		log.Printf("[Resolve] Parsed dependency - SenderVDAG: %s, SenderSeq: %s, Key: %s",
+			dep.SenderVDAG, dep.SenderSeq, dep.Key)
+
+		// Construct semaphore name
+		semName := fmt.Sprintf("/%s_%s_%s_sem", dep.Key, dep.SenderVDAG, dep.SenderSeq)
+		log.Printf("[Resolve] Attempting to check semaphore: %s", semName)
+
+		// Try to open existing semaphore first
+		for {
+			// Try to open the semaphore
+			sem, err = semaphore.Open(semName, semaphore.O_RDWR, 0666, 0)
+			if err != nil {
+				if strings.Contains(err.Error(), "No such file or directory") {
+					log.Printf("[Resolve] Semaphore %s not yet created, waiting...", semName)
+					time.Sleep(5 * time.Millisecond)
+					continue
+				}
+				log.Printf("[Resolve] Error opening semaphore %s: %v", semName, err)
+				return url.URL{}, false, false, fmt.Errorf("failed to open semaphore: %v", err)
+			}
+
+			// Try to acquire the semaphore to check its state
+			log.Printf("[Resolve] Checking semaphore state...")
+			if err := sem.Wait(); err != nil {
+				log.Printf("[Resolve] Error checking semaphore %s: %v", semName, err)
+				return url.URL{}, false, false, fmt.Errorf("failed to check semaphore: %v", err)
+			}
+
+			// Immediately release the semaphore back to the application
+			if err := sem.Post(); err != nil {
+				log.Printf("[Resolve] Error releasing semaphore %s: %v", semName, err)
+				return url.URL{}, false, false, fmt.Errorf("failed to release semaphore: %v", err)
+			}
+			
+			// Set up cleanup
+			defer sem.Close()
+			
+			log.Printf("[Resolve] Successfully verified semaphore %s state", semName)
+			break
+		}
 	}
+
+	
 
 	namespace := getNamespace(functionName, fecore.DefaultFunctionNamespace)
 

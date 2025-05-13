@@ -285,7 +285,6 @@ github.com/openfaas/faas-provider
 github.com/openfaas/faas-provider/auth
 github.com/openfaas/faas-provider/httputil
 github.com/openfaas/faas-provider/logs
-github.com/openfaas/faas-provider/proxy
 github.com/openfaas/faas-provider/types
 # github.com/openfaas/faas/gateway v0.0.0-20220929193640-1a00a55c7703
 ## explicit; go 1.18
@@ -374,10 +373,9 @@ golang.org/x/net/trace
 ## explicit
 golang.org/x/sync/errgroup
 golang.org/x/sync/semaphore
-# golang.org/x/sys v0.0.0-20220928140112-f11e5e49a4ec
-## explicit; go 1.17
+# golang.org/x/sys v0.15.0
+## explicit; go 1.18
 golang.org/x/sys/execabs
-golang.org/x/sys/internal/unsafeheader
 golang.org/x/sys/unix
 golang.org/x/sys/windows
 # golang.org/x/text v0.3.7
