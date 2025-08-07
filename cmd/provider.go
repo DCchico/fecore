@@ -137,6 +137,10 @@ func makeProviderCmd() *cobra.Command {
 		bootstrap.Router().HandleFunc("/ipam", handlers.MakeIPAMHandler(fs))
 		bootstrap.Router().HandleFunc("/workflow", handlers.MakeWorkflowHandler())
 
+		// Register state proxy handler
+		stateProxyHandler := handlers.NewStateProxyHandler()
+		stateProxyHandler.RegisterRoutes(bootstrap.Router())
+
 		log.Printf("Listening on TCP port: %d\n", *config.TCPPort)
 		bootstrap.Serve(&bootstrapHandlers, config)
 		return nil
