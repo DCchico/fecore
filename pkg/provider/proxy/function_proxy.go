@@ -33,14 +33,14 @@ import (
 const (
 	watchdogPort       = "8080"
 	defaultContentType = "text/plain"
-	dialTimeout        = 10 * time.Second
-	responseTimeout    = 10 * time.Second
+	dialTimeout        = 30 * time.Second  // Increased from 10s to 30s
+	responseTimeout    = 30 * time.Second  // Increased from 10s to 30s
 	maxIdleConns       = 100
 	maxIdleConnsPerHost = 20
 	idleConnTimeout    = 30 * time.Second
-	maxRetries         = 5
-	baseBackoff        = 50 // ms
-	maxBackoff         = 500 // ms
+	maxRetries         = 20  // Increased from 5 to 20
+	baseBackoff        = 100 // ms - Increased from 50ms to 100ms
+	maxBackoff         = 2000 // ms - Increased from 500ms to 2000ms
 )
 
 
@@ -198,7 +198,7 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 		response, err = proxyClient.Do(proxyReq.WithContext(reqCtx))
 		if err != nil {
 			connectionRetries++
-			log.Printf("[function_proxy] Retry %d for %s: %v", connectionRetries, functionName, err)
+			log.Printf("[function_proxy] Retry %d for %s: %v (cold start: %t)", connectionRetries, functionName, err, coldStart)
 			
 			// Calculate backoff with jitter
 			jitter := rand.Intn(backoff/4)

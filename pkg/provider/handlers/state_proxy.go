@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"syscall"
@@ -67,7 +68,10 @@ func (h *StateProxyHandler) HandleStateRequest(w http.ResponseWriter, r *http.Re
 		}
 		req.VDAGID = r.URL.Query().Get("vdag_id")
 		req.FrameID, _ = strconv.Atoi(r.URL.Query().Get("frame_id"))
-		req.Op = "Get"
+		req.Op = r.URL.Query().Get("op")
+		if req.Op == "" {
+			req.Op = "Get" // Default to Get if not specified
+		}
 		
 	case "PUT", "POST":
 		// For PUT/POST requests, parse from JSON body
@@ -93,7 +97,15 @@ func (h *StateProxyHandler) HandleStateRequest(w http.ResponseWriter, r *http.Re
 
 	// Validate request
 	if err := h.validateRequest(&req); err != nil {
-		h.sendErrorResponse(w, "Invalid request", err)
+		// Return validation errors as JSON response with HTTP 200 (not 400)
+		response := StateResponse{
+			Success: false,
+			Error:   fmt.Sprintf("Invalid request: %v", err),
+		}
+		responseJSON, _ := json.Marshal(response)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write(responseJSON)
 		return
 	}
 
@@ -287,23 +299,78 @@ func (h *StateProxyHandler) writeSharedMemory(stateID string, vdagID string, fra
 	return nil
 }
 
-// handleGetState handles state retrieval with proper semaphore waiting logic
+// handleGetState handles state retrieval with proper semaphore coordination
+// READ Operation responsibilities:
+// 1. Creates semaphore for current request
+// 2. Checks previous request semaphore to see if data is ready
+// 3. Cleans up previous semaphore after successful read
+// 4. Handles state existence: If state doesn't exist (first request), returns empty/None
+// 5. DOES NOT release current frame's semaphore - that's the WRITE operation's job
 func (h *StateProxyHandler) handleGetState(req *StateRequest) (StateResponse, error) {
 	log.Printf("[StateProxy] Getting state for state_id=%s, vdag_id=%s, frame_id=%d", 
 		req.StateID, req.VDAGID, req.FrameID)
 
-	// Construct semaphore name based on your Python naming convention
-	semName := fmt.Sprintf("/%s_%s_%d_sem", req.StateID, req.VDAGID, req.FrameID)
+	// Check if state exists based on state name (state ID + VDAG ID), not sequence numbers
+	stateName := fmt.Sprintf("%s_%s", req.StateID, req.VDAGID)
+	shmPath := fmt.Sprintf("/dev/shm/%s", stateName)
 	
-	// Wait for semaphore to exist and be ready (similar to your Python logic)
-	var sem *semaphore.Semaphore
-	var err error
+	// If this is the first request and state doesn't exist, return empty/None
+	if req.FrameID == 0 {
+		if _, err := os.Stat(shmPath); os.IsNotExist(err) {
+			log.Printf("[StateProxy] First request - state doesn't exist, returning empty")
+			return StateResponse{
+				Success: false,
+				Error:   "No previous state exists for frame 0",
+			}, nil
+		}
+	}
+
+	// Construct semaphore name for the current frame
+	currentFrameSemName := fmt.Sprintf("/%s_%s_%d_sem", req.StateID, req.VDAGID, req.FrameID)
+	
+	// Create semaphore for current request (READ responsibility #1)
+	semCurrent, err := semaphore.Open(currentFrameSemName, semaphore.O_CREAT|semaphore.O_EXCL, 0666, 0)
+	if err != nil {
+		// If semaphore already exists, try to open it without O_EXCL
+		if strings.Contains(err.Error(), "File exists") {
+			semCurrent, err = semaphore.Open(currentFrameSemName, semaphore.O_RDWR, 0666, 0)
+			if err != nil {
+				return StateResponse{
+					Success: false,
+					Error:   fmt.Sprintf("Failed to open existing semaphore for current frame: %v", err),
+				}, nil
+			}
+		} else {
+			return StateResponse{
+				Success: false,
+				Error:   fmt.Sprintf("Failed to create semaphore for current frame: %v", err),
+			}, nil
+		}
+	} else { _ = semCurrent }
+	// Don't defer semCurrent.Close() here - we need to keep it open for PUT operations
+
+	// For frame 0, just create the semaphore and return empty
+	if req.FrameID == 0 {
+		log.Printf("[StateProxy] Frame 0 requested - creating semaphore for coordination")
+		// DO NOT release the semaphore here - it will be released by the PUT operation
+		// Also, don't close the semaphore here - let the PUT operation grab it
+		return StateResponse{
+			Success: false,
+			Error:   "No previous state exists for frame 0",
+		}, nil
+	}
+
+	// For frame 1+, check previous request semaphore to see if data is ready (READ responsibility #2)
+	prevFrameSemName := fmt.Sprintf("/%s_%s_%d_sem", req.StateID, req.VDAGID, req.FrameID-1)
+	
+	// Wait for semaphore to exist and be ready
+	var semPrev *semaphore.Semaphore
 	maxWaitSeconds := 10
 	waitStart := time.Now()
 	
 	for {
-		// Try to open existing semaphore
-		sem, err = semaphore.Open(semName, semaphore.O_RDWR, 0666, 0)
+		// Try to open existing semaphore for the previous frame
+		semPrev, err = semaphore.Open(prevFrameSemName, semaphore.O_RDWR, 0666, 0)
 		if err == nil {
 			break // Semaphore exists, proceed
 		}
@@ -312,48 +379,42 @@ func (h *StateProxyHandler) handleGetState(req *StateRequest) (StateResponse, er
 		if time.Since(waitStart) >= time.Duration(maxWaitSeconds)*time.Second {
 			return StateResponse{
 				Success: false, 
-				Error:   fmt.Sprintf("Timeout waiting for semaphore after %d seconds", maxWaitSeconds),
+				Error:   fmt.Sprintf("Timeout waiting for semaphore %s after %d seconds", prevFrameSemName, maxWaitSeconds),
 			}, nil
 		}
 		
 		// Wait a bit before retrying (like your Python 10ms sleep)
 		time.Sleep(10 * time.Millisecond)
 	}
-	defer sem.Close()
 
-	// Try to acquire the semaphore with remaining time
-	remainingTime := time.Duration(maxWaitSeconds)*time.Second - time.Since(waitStart)
-	if remainingTime <= 0 {
-		return StateResponse{
-			Success: false,
-			Error:   "No time remaining to acquire semaphore",
-		}, nil
-	}
-	
 	// Acquire the semaphore (this will block until data is available)
-	if err := sem.Wait(); err != nil {
+	if err := semPrev.Wait(); err != nil {
+		semPrev.Close()
 		return StateResponse{
 			Success: false,
 			Error:   fmt.Sprintf("Failed to wait on semaphore: %v", err),
 		}, nil
 	}
 
-	// Release the semaphore immediately after acquiring
-	if err := sem.Post(); err != nil {
-		return StateResponse{
-			Success: false,
-			Error:   fmt.Sprintf("Failed to release semaphore: %v", err),
-		}, nil
-	}
-
-	// Read raw data from shared memory (blind forwarder)
-	data, err := h.readSharedMemory(req.StateID, req.VDAGID, req.FrameID)
+	// Read raw data from shared memory for the previous frame
+	data, err := h.readSharedMemory(req.StateID, req.VDAGID, req.FrameID-1)
 	if err != nil {
+		semPrev.Close()
 		return StateResponse{
 			Success: false,
 			Error:   fmt.Sprintf("Failed to read shared memory: %v", err),
 		}, nil
 	}
+
+	// Clean up previous semaphore after successful read (READ responsibility #3)
+	if err := semaphore.Unlink(prevFrameSemName); err != nil {
+		log.Printf("[StateProxy] Warning: Failed to unlink previous semaphore %s: %v", prevFrameSemName, err)
+	}
+	semPrev.Close()
+
+	// DO NOT release current frame's semaphore here - that's the WRITE operation's responsibility
+	// The current frame's semaphore will be released by handlePutState when data is written
+	// Also, don't close semCurrent here - let the PUT operation handle it
 
 	log.Printf("[StateProxy] Successfully retrieved state for %s", req.StateID)
 	
@@ -363,25 +424,42 @@ func (h *StateProxyHandler) handleGetState(req *StateRequest) (StateResponse, er
 	}, nil
 }
 
-// handlePutState handles state storage with proper semaphore creation
+// handlePutState handles state storage with proper semaphore coordination
+// WRITE Operation responsibilities:
+// 1. Grabs semaphore created by current request's read
+// 2. Writes data to shared memory
+// 3. Increments/releases semaphore to signal data is ready for next frame
+// 4. Creates state if it doesn't exist (first request)
 func (h *StateProxyHandler) handlePutState(req *StateRequest) (StateResponse, error) {
 	log.Printf("[StateProxy] Putting state for state_id=%s, vdag_id=%s, frame_id=%d", 
 		req.StateID, req.VDAGID, req.FrameID)
 
-	// Construct semaphore name
+	// Construct semaphore name for the current frame
 	semName := fmt.Sprintf("/%s_%s_%d_sem", req.StateID, req.VDAGID, req.FrameID)
 	
-	// Create the semaphore (like your Python O_CREAT | O_EXCL)
-	sem, err := semaphore.Open(semName, semaphore.O_CREAT|semaphore.O_EXCL, 0666, 0)
+	// Grab semaphore created by current request's read (WRITE responsibility #1)
+	// Try to open existing semaphore first
+	sem, err := semaphore.Open(semName, semaphore.O_RDWR, 0666, 0)
 	if err != nil {
-		return StateResponse{
-			Success: false,
-			Error:   fmt.Sprintf("Failed to create semaphore: %v", err),
-		}, nil
+		// If semaphore doesn't exist, try to create it (for frame 0 case)
+		if strings.Contains(err.Error(), "No such file or directory") {
+			sem, err = semaphore.Open(semName, semaphore.O_CREAT|semaphore.O_RDWR, 0666, 0)
+			if err != nil {
+				return StateResponse{
+					Success: false,
+					Error:   fmt.Sprintf("Failed to create semaphore for write operation: %v", err),
+				}, nil
+			}
+		} else {
+			return StateResponse{
+				Success: false,
+				Error:   fmt.Sprintf("Failed to grab semaphore created by read operation: %v", err),
+			}, nil
+		}
 	}
 	defer sem.Close()
 
-	// Write raw data to shared memory (blind forwarder)
+	// Write raw data to shared memory (creates state if it doesn't exist - WRITE responsibility #3)
 	if err := h.writeSharedMemory(req.StateID, req.VDAGID, req.FrameID, req.Data); err != nil {
 		return StateResponse{
 			Success: false,
@@ -389,13 +467,16 @@ func (h *StateProxyHandler) handlePutState(req *StateRequest) (StateResponse, er
 		}, nil
 	}
 	
-	// Release the semaphore to indicate data is ready
+	// Increment/release semaphore to signal data is ready (WRITE responsibility #2)
 	if err := sem.Post(); err != nil {
 		return StateResponse{
 			Success: false,
 			Error:   fmt.Sprintf("Failed to post semaphore: %v", err),
 		}, nil
 	}
+
+	// Close the semaphore after we're done with it
+	sem.Close()
 
 	log.Printf("[StateProxy] Successfully stored state for %s", req.StateID)
 	
@@ -415,6 +496,7 @@ func (h *StateProxyHandler) sendErrorResponse(w http.ResponseWriter, message str
 	}
 	
 	responseJSON, _ := json.Marshal(response)
-	w.WriteHeader(http.StatusBadRequest)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK) // Return HTTP 200 with error in JSON body
 	w.Write(responseJSON)
 } 
