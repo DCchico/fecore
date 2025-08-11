@@ -9,7 +9,7 @@ import (
 	"net/http"
 
 	"github.com/gorilla/mux"
-	"github.com/openfaas/faas-provider/auth"
+	// "github.com/openfaas/faas-provider/auth"
 	"github.com/openfaas/faas-provider/types"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -33,15 +33,15 @@ func Router() *mux.Router {
 // Serve load your handlers into the correct OpenFaaS route spec. This function is blocking.
 func Serve(handlers *types.FaaSHandlers, config *types.FaaSConfig) {
 
-	if config.EnableBasicAuth {
-		reader := auth.ReadBasicAuthFromDisk{
-			SecretMountPath: config.SecretMountPath,
-		}
+	// if config.EnableBasicAuth {
+	//	reader := auth.ReadBasicAuthFromDisk{
+	//		SecretMountPath: config.SecretMountPath,
+	//	}
 
-		credentials, err := reader.Read()
-		if err != nil {
-			log.Fatal(err)
-		}
+	//	credentials, err := reader.Read()
+	//	if err != nil {
+	//		log.Fatal(err)
+	//	}
 
 		// handlers.FunctionReader = auth.DecorateWithBasicAuth(handlers.FunctionReader, credentials)
 		// handlers.DeployHandler = auth.DecorateWithBasicAuth(handlers.DeployHandler, credentials)
@@ -51,8 +51,8 @@ func Serve(handlers *types.FaaSHandlers, config *types.FaaSConfig) {
 		// handlers.ReplicaUpdater = auth.DecorateWithBasicAuth(handlers.ReplicaUpdater, credentials)
 		// handlers.InfoHandler = auth.DecorateWithBasicAuth(handlers.InfoHandler, credentials)
 		// handlers.SecretHandler = auth.DecorateWithBasicAuth(handlers.SecretHandler, credentials)
-		handlers.LogHandler = auth.DecorateWithBasicAuth(handlers.LogHandler, credentials)
-	}
+		// handlers.LogHandler = auth.DecorateWithBasicAuth(handlers.LogHandler, credentials)
+	//}
 
 	hm := newHttpMetrics()
 

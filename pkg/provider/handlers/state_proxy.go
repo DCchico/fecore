@@ -177,11 +177,11 @@ func (h *StateProxyHandler) openSharedMemory(vdagID string, create bool) (int, e
 }
 
 // readSharedMemory reads raw data from shared memory using POSIX shared memory
-func (h *StateProxyHandler) readSharedMemory(vdagID string, frameID int) ([]byte, error) {
+func (h *StateProxyHandler) readSharedMemory(stateID string, vdagID string, frameID int) ([]byte, error) {
 	log.Printf("[StateProxy] Reading shared memory for vdag_id=%s, frame_id=%d", vdagID, frameID)
 	
 	// Open existing shared memory segment (same as Python's SharedMemory(name=f"vt_camera_{camera_id}", create=False))
-	shmName := fmt.Sprintf("vt_camera_%s", vdagID)
+	shmName := fmt.Sprintf("%s_%s", stateID, vdagID)
 	
 	// Open the shared memory file descriptor
 	fd, err := syscall.Open(fmt.Sprintf("/dev/shm/%s", shmName), syscall.O_RDWR, 0666)
@@ -235,11 +235,11 @@ func (h *StateProxyHandler) readSharedMemory(vdagID string, frameID int) ([]byte
 }
 
 // writeSharedMemory writes raw data to shared memory using POSIX shared memory
-func (h *StateProxyHandler) writeSharedMemory(vdagID string, frameID int, data []byte) error {
-	log.Printf("[StateProxy] Writing shared memory for vdag_id=%s, frame_id=%d, data_size=%d", vdagID, frameID, len(data))
+func (h *StateProxyHandler) writeSharedMemory(stateID string, vdagID string, frameID int, data []byte) error {
+	log.Printf("[StateProxy] Writing shared memory for state_id=%s, vdag_id=%s, frame_id=%d, data_size=%d", stateID, vdagID, frameID, len(data))
 	
 	// Open or create shared memory segment (same as Python's SharedMemory)
-	shmName := fmt.Sprintf("vt_camera_%s", vdagID)
+	shmName := fmt.Sprintf("%s_%s", stateID, vdagID)
 	shmPath := fmt.Sprintf("/dev/shm/%s", shmName)
 	
 	var fd int
@@ -293,7 +293,7 @@ func (h *StateProxyHandler) handleGetState(req *StateRequest) (StateResponse, er
 		req.StateID, req.VDAGID, req.FrameID)
 
 	// Construct semaphore name based on your Python naming convention
-	semName := fmt.Sprintf("/vt_%s_%d_sem", req.VDAGID, req.FrameID)
+	semName := fmt.Sprintf("/%s_%s_%d_sem", req.StateID, req.VDAGID, req.FrameID)
 	
 	// Wait for semaphore to exist and be ready (similar to your Python logic)
 	var sem *semaphore.Semaphore
@@ -347,7 +347,7 @@ func (h *StateProxyHandler) handleGetState(req *StateRequest) (StateResponse, er
 	}
 
 	// Read raw data from shared memory (blind forwarder)
-	data, err := h.readSharedMemory(req.VDAGID, req.FrameID)
+	data, err := h.readSharedMemory(req.StateID, req.VDAGID, req.FrameID)
 	if err != nil {
 		return StateResponse{
 			Success: false,
@@ -369,7 +369,7 @@ func (h *StateProxyHandler) handlePutState(req *StateRequest) (StateResponse, er
 		req.StateID, req.VDAGID, req.FrameID)
 
 	// Construct semaphore name
-	semName := fmt.Sprintf("/vt_%s_%d_sem", req.VDAGID, req.FrameID)
+	semName := fmt.Sprintf("/%s_%s_%d_sem", req.StateID, req.VDAGID, req.FrameID)
 	
 	// Create the semaphore (like your Python O_CREAT | O_EXCL)
 	sem, err := semaphore.Open(semName, semaphore.O_CREAT|semaphore.O_EXCL, 0666, 0)
@@ -382,7 +382,7 @@ func (h *StateProxyHandler) handlePutState(req *StateRequest) (StateResponse, er
 	defer sem.Close()
 
 	// Write raw data to shared memory (blind forwarder)
-	if err := h.writeSharedMemory(req.VDAGID, req.FrameID, req.Data); err != nil {
+	if err := h.writeSharedMemory(req.StateID, req.VDAGID, req.FrameID, req.Data); err != nil {
 		return StateResponse{
 			Success: false,
 			Error:   fmt.Sprintf("Failed to write shared memory: %v", err),
