@@ -399,6 +399,175 @@ class StateProxyTester:
             self.test_results.append(("Error Handling", False, "Some error cases not handled correctly"))
             return False
     
+    def test_state_proxy_to_python_handoff(self) -> bool:
+        """Test 6: State proxy to Python handoff - test if Python can pick up semaphores created by state proxy"""
+        self.log("=== Test 6: State Proxy to Python Handoff ===")
+        
+        try:
+            # Step 1: Use state proxy for frames 1-5 (leaving frame 5 semaphore unlinked)
+            self.log("Step 1: State proxy managing frames 1-5...")
+            
+            camera_id = "vDAG1"
+            test_data = b"handoff_test_data"
+            
+            for frame_id in range(1, 6):
+                # PUT frame data via state proxy
+                put_data = {
+                    "state_id": "vt",
+                    "vdag_id": camera_id,
+                    "frame_id": frame_id,
+                    "op": "Put",
+                    "data": base64.b64encode(test_data + f"_frame_{frame_id}".encode()).decode('utf-8')
+                }
+                
+                response = requests.post(self.state_endpoint, json=put_data, timeout=10)
+                if response.status_code != 200:
+                    self.log(f"Frame {frame_id} PUT failed: {response.text}", "ERROR")
+                    self.test_results.append(("State Proxy to Python Handoff", False, f"Frame {frame_id} PUT failed"))
+                    return False
+                    
+                result = response.json()
+                if not result.get("success", False):
+                    self.log(f"Frame {frame_id} PUT failed: {result.get('error')}", "ERROR")
+                    self.test_results.append(("State Proxy to Python Handoff", False, f"Frame {frame_id} PUT failed: {result.get('error')}"))
+                    return False
+                    
+                self.log(f"✓ Frame {frame_id} PUT via state proxy successful")
+            
+            # Step 2: Python takes over frame 6 (should pick up frame 5 semaphore)
+            self.log("Step 2: Python taking over frame 6...")
+            
+            # Import required modules for Python POSIX IPC
+            from multiprocessing import shared_memory
+            import struct
+            import posix_ipc
+            
+            # Check if shared memory exists
+            shm_name = f"vt_{camera_id}"
+            try:
+                shm = shared_memory.SharedMemory(name=shm_name, create=False)
+                self.log("✓ Shared memory exists and accessible")
+            except FileNotFoundError:
+                self.log("✗ Shared memory not found", "ERROR")
+                self.test_results.append(("State Proxy to Python Handoff", False, "Shared memory not found"))
+                return False
+            
+            # Try to open previous frame's semaphore (frame 5) - created by state proxy
+            sem_prev_name = f"/vt_{camera_id}_5_sem"
+            try:
+                sem_prev = posix_ipc.Semaphore(sem_prev_name)
+                self.log("✓ Previous frame semaphore (created by state proxy) exists")
+                
+                # Try to acquire the semaphore
+                sem_prev.acquire(timeout=1)  # Should succeed immediately
+                self.log("✓ Successfully acquired previous frame semaphore")
+                
+                # Read data from shared memory
+                header = bytes(shm.buf[:24])
+                current_frame, state_size, valid = struct.unpack("!QQQ", header)
+                
+                if valid == 1 and current_frame == 5:
+                    data = bytes(shm.buf[24:24+state_size])
+                    self.log(f"✓ Successfully read frame 5 data: {data[:50]}...")
+                    
+                    # Verify we got the expected data
+                    expected_data = test_data + b"_frame_5"
+                    if data == expected_data:
+                        self.log("✓ Data matches expected content")
+                    else:
+                        self.log(f"✗ Data mismatch: expected {expected_data}, got {data}", "ERROR")
+                        self.test_results.append(("State Proxy to Python Handoff", False, "Data mismatch"))
+                        return False
+                else:
+                    self.log(f"✗ Invalid shared memory state: frame={current_frame}, valid={valid}", "ERROR")
+                    self.test_results.append(("State Proxy to Python Handoff", False, f"Invalid shared memory state: frame={current_frame}, valid={valid}"))
+                    return False
+                
+                # Clean up previous semaphore
+                sem_prev.unlink()
+                sem_prev.close()
+                self.log("✓ Cleaned up previous frame semaphore")
+                
+            except posix_ipc.ExistentialError:
+                self.log("✗ Previous frame semaphore not found", "ERROR")
+                self.test_results.append(("State Proxy to Python Handoff", False, "Previous frame semaphore not found"))
+                return False
+            except Exception as e:
+                self.log(f"✗ Error accessing previous frame semaphore: {e}", "ERROR")
+                self.test_results.append(("State Proxy to Python Handoff", False, f"Error accessing previous frame semaphore: {e}"))
+                return False
+            
+            # Create current frame's semaphore
+            sem_current_name = f"/vt_{camera_id}_6_sem"
+            try:
+                sem_current = posix_ipc.Semaphore(sem_current_name, posix_ipc.O_CREAT | posix_ipc.O_EXCL, initial_value=0)
+                self.log("✓ Created current frame semaphore")
+            except posix_ipc.ExistentialError:
+                self.log("✗ Current frame semaphore already exists (concurrent access)", "ERROR")
+                self.test_results.append(("State Proxy to Python Handoff", False, "Current frame semaphore already exists"))
+                return False
+            
+            # Write data to shared memory
+            enhanced_data = test_data + b"_frame_6_enhanced_by_python"
+            
+            if len(enhanced_data) > len(shm.buf) - 24:
+                self.log("✗ Data too large for shared memory", "ERROR")
+                self.test_results.append(("State Proxy to Python Handoff", False, "Data too large for shared memory"))
+                return False
+            
+            # Write data first, then header
+            shm.buf[24:24+len(enhanced_data)] = enhanced_data
+            shm.buf[:24] = struct.pack("!QQQ", 6, len(enhanced_data), 1)
+            
+            # Release semaphore to signal completion
+            sem_current.release()
+            self.log("✓ Successfully stored frame 6 data and released semaphore")
+            
+            # Clean up
+            sem_current.close()
+            shm.close()
+            
+            # Step 3: Verify handoff worked by checking if state proxy can continue
+            self.log("Step 3: Verifying state proxy can continue from Python's work...")
+            
+            # Try to get frame 7 data via state proxy (should get frame 6 data from Python)
+            params = {
+                "state_id": "vt",
+                "vdag_id": camera_id,
+                "frame_id": "7",
+                "op": "Get"
+            }
+            
+            response = requests.get(self.state_endpoint, params=params, timeout=15)
+            if response.status_code != 200:
+                self.log(f"Frame 7 GET failed: {response.text}", "ERROR")
+                self.test_results.append(("State Proxy to Python Handoff", False, "Frame 7 GET failed"))
+                return False
+                
+            result = response.json()
+            if not result.get("success", False):
+                self.log(f"Frame 7 GET failed: {result.get('error')}", "ERROR")
+                self.test_results.append(("State Proxy to Python Handoff", False, f"Frame 7 GET failed: {result.get('error')}"))
+                return False
+            
+            # Verify we got the correct data from Python
+            data = base64.b64decode(result.get("data", ""))
+            if data == enhanced_data:
+                self.log("✓ State proxy successfully retrieved data written by Python")
+            else:
+                self.log(f"✗ State proxy got wrong data: {data}", "ERROR")
+                self.test_results.append(("State Proxy to Python Handoff", False, "State proxy got wrong data"))
+                return False
+            
+            self.log("✓ State proxy to Python handoff test passed")
+            self.test_results.append(("State Proxy to Python Handoff", True, "Successfully handed off from state proxy to Python and back"))
+            return True
+            
+        except Exception as e:
+            self.log(f"Handoff test error: {e}", "ERROR")
+            self.test_results.append(("State Proxy to Python Handoff", False, str(e)))
+            return False
+    
     def run_all_tests(self) -> Dict[str, Any]:
         """Run all tests and return summary"""
         self.log("Starting State Proxy Tests")
@@ -412,7 +581,8 @@ class StateProxyTester:
             ("Frame 0 Workflow", self.test_frame_0_workflow),
             ("Frame Sequence Ordering", self.test_frame_sequence_ordering),
             ("Concurrent Access", self.test_concurrent_access),
-            ("Error Handling", self.test_error_handling)
+            ("Error Handling", self.test_error_handling),
+            ("State Proxy to Python Handoff", self.test_state_proxy_to_python_handoff)
         ]
         
         results = {}
@@ -475,7 +645,7 @@ def main():
     parser = argparse.ArgumentParser(description="Test State Proxy functionality")
     parser.add_argument("--url", default="http://localhost:8081", 
                        help="Base URL of the state proxy (default: http://localhost:8081)")
-    parser.add_argument("--test", choices=["all", "basic", "frame0", "sequence", "concurrent", "errors"],
+    parser.add_argument("--test", choices=["all", "basic", "frame0", "sequence", "concurrent", "errors", "handoff"],
                        default="all", help="Specific test to run (default: all)")
     
     args = parser.parse_args()
@@ -492,7 +662,8 @@ def main():
             "frame0": tester.test_frame_0_workflow,
             "sequence": tester.test_frame_sequence_ordering,
             "concurrent": tester.test_concurrent_access,
-            "errors": tester.test_error_handling
+            "errors": tester.test_error_handling,
+            "handoff": tester.test_state_proxy_to_python_handoff
         }
         
         test_func = test_map.get(args.test)

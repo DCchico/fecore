@@ -34,7 +34,7 @@ apt-get install -y \
   libc6-dev \
   msr-tools
 
-pip3 install psutil numpy opencv-python
+pip3 install psutil numpy opencv-python requests posix_ipc
 
 # Install Redis using apt
 echo "Installing Redis..."

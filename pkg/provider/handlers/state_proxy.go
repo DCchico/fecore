@@ -271,6 +271,12 @@ func (h *StateProxyHandler) writeSharedMemory(stateID string, vdagID string, fra
 			syscall.Close(fd)
 			return fmt.Errorf("failed to set shared memory size: %v", err)
 		}
+		
+		// Ensure shared memory has correct permissions for universal access
+		if err := syscall.Chmod(shmPath, 0666); err != nil {
+			log.Printf("[StateProxy] Warning: Failed to set shared memory permissions: %v", err)
+		}
+		// Keep ownership as root:root but ensure 666 permissions for universal access
 	}
 	defer syscall.Close(fd)
 	
@@ -346,7 +352,15 @@ func (h *StateProxyHandler) handleGetState(req *StateRequest) (StateResponse, er
 				Error:   fmt.Sprintf("Failed to create semaphore for current frame: %v", err),
 			}, nil
 		}
-	} else { _ = semCurrent }
+	} else {
+		// Ensure semaphore has correct permissions for universal access
+		_ = semCurrent
+		semPath := fmt.Sprintf("/dev/shm/sem.%s", strings.TrimPrefix(currentFrameSemName, "/"))
+		if err := syscall.Chmod(semPath, 0666); err != nil {
+			log.Printf("[StateProxy] Warning: Failed to set semaphore permissions: %v", err)
+		}
+		// Keep ownership as root:root but ensure 666 permissions for universal access
+	}
 	// Don't defer semCurrent.Close() here - we need to keep it open for PUT operations
 
 	// For frame 0, just create the semaphore and return empty
@@ -450,6 +464,13 @@ func (h *StateProxyHandler) handlePutState(req *StateRequest) (StateResponse, er
 					Error:   fmt.Sprintf("Failed to create semaphore for write operation: %v", err),
 				}, nil
 			}
+			
+			// Ensure semaphore has correct permissions for universal access
+			semPath := fmt.Sprintf("/dev/shm/sem.%s", strings.TrimPrefix(semName, "/"))
+			if err := syscall.Chmod(semPath, 0666); err != nil {
+				log.Printf("[StateProxy] Warning: Failed to set semaphore permissions: %v", err)
+			}
+			// Keep ownership as root:root but ensure 666 permissions for universal access
 		} else {
 			return StateResponse{
 				Success: false,

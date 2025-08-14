@@ -215,6 +215,7 @@ func createReplica(client *containerd.Client, cni gocni.CNI, fs *FunctionStore, 
 				withCPU(cpu),
 				withCPUSet(cpuSet),
 				withHostIPC(),
+				oci.WithPrivileged,
 			),
 			containerd.WithContainerLabels(labels),
 		)
@@ -236,6 +237,7 @@ func createReplica(client *containerd.Client, cni gocni.CNI, fs *FunctionStore, 
 				withMemory(memory),
 				withCPU(cpu),
 				withHostIPC(),
+				oci.WithPrivileged,
 			),
 			containerd.WithContainerLabels(labels),
 		)
@@ -447,3 +449,7 @@ func withCPUSet(cpus string) oci.SpecOpts {
 func withHostIPC() oci.SpecOpts {
 	return oci.WithHostNamespace(specs.IPCNamespace)
 }
+
+
+
+
