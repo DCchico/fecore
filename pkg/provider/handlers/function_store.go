@@ -568,7 +568,7 @@ func (fs *FunctionStore) GetIdleReplicaAtomic(fn string, requestID string) (stri
 }
 
 // RecordInvocationDetails records the association between functionName, vDAGID, sequenceID, and containerIP
-func (fs *FunctionStore) RecordInvocationDetails(functionName, vDAGID, sequenceID, containerIP string, releaseLocalState bool) {
+func (fs *FunctionStore) RecordInvocationDetails(functionName, vDAGID, sequenceID, containerIP string, releaseLocalState bool, reserveLocalState bool) {
 	fs.dfMu.Lock()
 	defer fs.dfMu.Unlock()
 
@@ -587,7 +587,12 @@ func (fs *FunctionStore) RecordInvocationDetails(functionName, vDAGID, sequenceI
 	}
 	if releaseLocalState {
 		if contains(fs.dependentContainers, containerIP) {
-			remove(fs.dependentContainers, containerIP)
+			fs.dependentContainers = remove(fs.dependentContainers, containerIP)
+		}
+	}
+	if reserveLocalState {
+		if !contains(fs.dependentContainers, containerIP) {
+			fs.dependentContainers = append(fs.dependentContainers, containerIP)
 		}
 	}
 }
@@ -612,7 +617,9 @@ func (fs *FunctionStore) GetInvocationDetails(functionName, vDAGID, sequenceID s
 						delete(fs.deployedFunctions[functionName].idleReplicas, name)
 						delete(fs.deployedFunctions[functionName].idleReplicasTs, name)
 						fs.deployedFunctions[functionName].activeReplicas[name] = ip
-						fs.dependentContainers = append(fs.dependentContainers, ip)
+						if !contains(fs.dependentContainers, ip) {
+							fs.dependentContainers = append(fs.dependentContainers, ip)
+						}
 						return ip, false
 					}
 				}

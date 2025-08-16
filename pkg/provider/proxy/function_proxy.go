@@ -127,12 +127,10 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 	dependentStateLocation := originalReq.Header.Get("dependent-state-location")
 
 	var releaseLocalState bool = false
-	if dependentStateLocation == "direct" && stateLocation != "shared_memory" {
-		releaseLocalState = true
-	}
+	var reserveLocalState bool = false
 
 	var dependencies []handlers.DependencyInfo
-	if stateLocation == "direct" && stateDependencies != "" {
+	if dependentStateLocation == "direct" && stateDependencies != "" {
 		log.Printf("[function_proxy] Direct state access mode detected for function %s", functionName)
 		log.Printf("[function_proxy] State dependencies: %s", stateDependencies)
 
@@ -145,11 +143,17 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 				log.Printf("[function_proxy] Dependency - SenderVDAG: %s, SenderSeq: %s", dep.SenderVDAG, dep.SenderSeq)
 			}
 		}
+		// Set releaseLocalState based on whether we're transitioning
+		releaseLocalState = (stateLocation != "direct")
+	} else if stateLocation == "direct" && dependentStateLocation != "direct" {
+		// Shared Memory → Direct transition: reserve the current container for future dependencies
+		log.Printf("[function_proxy] Shared Memory → Direct transition detected for function %s", functionName)
+		reserveLocalState = true
 	}
 
 	dataCentricDependency := originalReq.Header.Get("data-centric-dependency")
 
-	functionAddr, coldStart, isInitialized, resolveErr := resolver.Resolve(functionName, requestID, dependencies, vDAGID, sequenceID, releaseLocalState, dataCentricDependency)
+	functionAddr, coldStart, isInitialized, resolveErr := resolver.Resolve(functionName, requestID, dependencies, vDAGID, sequenceID, releaseLocalState, reserveLocalState, dataCentricDependency)
 	if resolveErr != nil {
 		log.Printf("resolver error: no endpoints for %s: %s\n", functionName, resolveErr.Error())
 		httputil.Errorf(w, http.StatusServiceUnavailable, "No endpoints available for: %s.", functionName)
