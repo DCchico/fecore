@@ -85,7 +85,7 @@ func (i *InvokeResolver) Resolve(functionName string, requestID string, dependen
 				return *urlRes, coldStart, true, nil
 			} else if !isRunning && containerIP == "" {
 				log.Printf("[Resolve] Dependent container has not been executed yet - SenderVDAG: %s, SenderSeq: %s", dep.SenderVDAG, dep.SenderSeq)
-				time.Sleep(50 * time.Millisecond)
+				time.Sleep(10 * time.Millisecond)
 			} else if containerIP == "Unknown" {
 				log.Printf("[Resolve] Dependent container %s is unknown - SenderVDAG: %s, SenderSeq: %s", containerIP, dep.SenderVDAG, dep.SenderSeq)
 				break
