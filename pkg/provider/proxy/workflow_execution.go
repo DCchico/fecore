@@ -4,9 +4,25 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"strings"
 
 	"github.gatech.edu/faasedge/fecore/pkg/provider/handlers"
 )
+
+const stateflowResponseURLFile = "/var/lib/fecore/stateflow-response.url"
+
+func stateflowResponseURL() (string, error) {
+	b, err := os.ReadFile(stateflowResponseURLFile)
+	if err != nil {
+		return "", fmt.Errorf("read %s: %w", stateflowResponseURLFile, err)
+	}
+	u := strings.TrimSpace(string(b))
+	if u == "" {
+		return "", fmt.Errorf("%s is empty", stateflowResponseURLFile)
+	}
+	return u, nil
+}
 
 // isLastFunction checks if the given function is the last function in the workflow
 func getDonwstreamFunction(functionName string, wf *handlers.Workflow) string {
@@ -28,9 +44,11 @@ func sendDownstreamRequest(functionName, workflowID, vDAGID, headerContentType, 
 	downstreamFunction := getDonwstreamFunction(functionName, &wf)
 
 	if downstreamFunction == "" {
-		// Send response back to stateflow
-		// TODO: harded coded for now; move it to healthcheck registration.
-		nextURL := "http://128.110.217.72:8088/response"
+		// Written by auto_init.sh so a new CloudLab reservation does not bake in an address.
+		nextURL, err := stateflowResponseURL()
+		if err != nil {
+			return fmt.Errorf("stateflow response address: %w", err)
+		}
 		req, err := http.NewRequest("POST", nextURL, response.Body)
 		if err != nil {
 			return fmt.Errorf("failed to create request to stateflow: %v", err)

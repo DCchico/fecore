@@ -181,15 +181,13 @@ func createReplica(client *containerd.Client, cni gocni.CNI, fs *FunctionStore, 
 	
 	// Check if function needs dedicated core
 	if val, ok := fn.labels["com.openfaas.cpu.dedicated"]; ok && val == "true" {
-		// Use cores 4-11 for dedicated functions
-		// Colocate two containers on the same core before moving to next core
-		// This ensures better resource utilization and potentially higher CPU frequency
-		coreGroup := (fn.replicas / 2) % 8  // Group of 2 containers per core
-		dedicatedCore := 4 + coreGroup      // 8 cores from 4-11
+		// nosmt leaves CPUs 0-7, one logical CPU per physical core.
+		// One replica per CPU so two processes do not share a core.
+		dedicatedCore := fn.replicas % 8
 		cpuSet = strconv.Itoa(dedicatedCore)
 		useCPUSet = true
-		log.Printf("[createReplica] Assigning dedicated core %d to function '%s' (replica %d, core group %d)", 
-			dedicatedCore, fn.name, fn.replicas, coreGroup)
+		log.Printf("[createReplica] Assigning dedicated core %d to function '%s' (replica %d)",
+			dedicatedCore, fn.name, fn.replicas)
 	}
 	log.Printf("[createReplica] Creating new container for Function '%s' with memory limit: %d bytes, CPU limit: %d milliCPU, CPU set: %s", 
 		name, fn.memoryLimit, fn.cpuLimit, cpuSet)

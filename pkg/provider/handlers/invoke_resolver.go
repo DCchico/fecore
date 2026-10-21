@@ -112,14 +112,24 @@ func (i *InvokeResolver) Resolve(functionName string, requestID string, dependen
 		semName := fmt.Sprintf("/%s_%s_%s_sem", dep.Key, dep.SenderVDAG, dep.SenderSeq)
 		log.Printf("[Resolve] Attempting to check semaphore: %s", semName)
 
-		// Try to open existing semaphore first
+		// The previous invocation creates this semaphore when its state is
+		// committed. Wait for that, but do not spin forever: a name mismatch
+		// used to pin the provider until it was restarted.
+		deadline := time.Now().Add(30 * time.Second)
+		nextLog := time.Time{}
 		for {
-			// Try to open the semaphore
 			sem, err = semaphore.Open(semName, semaphore.O_RDWR, 0666, 0)
 			if err != nil {
 				if strings.Contains(err.Error(), "No such file or directory") {
-					log.Printf("[Resolve] Semaphore %s not yet created, waiting...", semName)
-					time.Sleep(5 * time.Millisecond)
+					if time.Now().After(deadline) {
+						log.Printf("[Resolve] Timed out waiting for semaphore %s", semName)
+						return url.URL{}, false, false, fmt.Errorf("timed out waiting for data-centric semaphore %s", semName)
+					}
+					if time.Now().After(nextLog) {
+						log.Printf("[Resolve] Semaphore %s not yet created, waiting...", semName)
+						nextLog = time.Now().Add(time.Second)
+					}
+					time.Sleep(20 * time.Millisecond)
 					continue
 				}
 				log.Printf("[Resolve] Error opening semaphore %s: %v", semName, err)
