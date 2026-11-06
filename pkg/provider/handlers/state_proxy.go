@@ -558,7 +558,7 @@ func (h *StateProxyHandler) HandleSocialState(w http.ResponseWriter, r *http.Req
 		buf := make([]byte, 8+len(req.Data))
 		binary.LittleEndian.PutUint64(buf[:8], uint64(len(req.Data)))
 		copy(buf[8:], req.Data)
-		if err := os.WriteFile(path, buf, 0666); err != nil {
+		if err := publishSocialCopy(path, buf); err != nil {
 			h.sendErrorResponse(w, "social state write failed", err)
 			return
 		}
@@ -566,6 +566,28 @@ func (h *StateProxyHandler) HandleSocialState(w http.ResponseWriter, r *http.Req
 	default:
 		h.sendErrorResponse(w, "invalid social state op", fmt.Errorf("%s", req.Op))
 	}
+}
+
+// Publish a complete immutable copy. Local readers and direct-cache stamps
+// must never observe a truncated prefix or an in-place partially written body.
+func publishSocialCopy(path string, data []byte) error {
+	temporary, err := os.CreateTemp("/dev/shm", "sn-publish-*")
+	if err != nil {
+		return err
+	}
+	name := temporary.Name()
+	defer os.Remove(name)
+	if err = temporary.Chmod(0666); err == nil {
+		_, err = temporary.Write(data)
+	}
+	closeErr := temporary.Close()
+	if err != nil {
+		return err
+	}
+	if closeErr != nil {
+		return closeErr
+	}
+	return os.Rename(name, path)
 }
 
 // sendErrorResponse sends an error response

@@ -63,3 +63,30 @@ func TestCameraStateRouteRemainsRegistered(t *testing.T) {
 		}
 	}
 }
+
+func TestSocialPublicationReplacesInsteadOfMutatingReaderCopy(t *testing.T) {
+	path := "/dev/shm/sn_unit-social-atomic"
+	defer os.Remove(path)
+	if err := publishSocialCopy(path, []byte("before")); err != nil {
+		t.Fatal(err)
+	}
+	reader, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Close()
+	if err := publishSocialCopy(path, []byte("after")); err != nil {
+		t.Fatal(err)
+	}
+	old := make([]byte, 6)
+	if _, err := reader.Read(old); err != nil {
+		t.Fatal(err)
+	}
+	current, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(old) != "before" || string(current) != "after" {
+		t.Fatalf("old=%q current=%q", old, current)
+	}
+}
