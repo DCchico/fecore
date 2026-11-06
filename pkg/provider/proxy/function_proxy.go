@@ -31,18 +31,54 @@ import (
 )
 
 const (
-	watchdogPort       = "8080"
-	defaultContentType = "text/plain"
-	dialTimeout        = 30 * time.Second  // Increased from 10s to 30s
-	responseTimeout    = 30 * time.Second  // Increased from 10s to 30s
-	maxIdleConns       = 100
+	watchdogPort        = "8080"
+	defaultContentType  = "text/plain"
+	dialTimeout         = 30 * time.Second // Increased from 10s to 30s
+	responseTimeout     = 30 * time.Second // Increased from 10s to 30s
+	maxIdleConns        = 100
 	maxIdleConnsPerHost = 20
-	idleConnTimeout    = 30 * time.Second
-	maxRetries         = 20  // Increased from 5 to 20
-	baseBackoff        = 100 // ms - Increased from 50ms to 100ms
-	maxBackoff         = 2000 // ms - Increased from 500ms to 2000ms
+	idleConnTimeout     = 30 * time.Second
+	maxRetries          = 20   // Increased from 5 to 20
+	baseBackoff         = 100  // ms - Increased from 50ms to 100ms
+	maxBackoff          = 2000 // ms - Increased from 500ms to 2000ms
+	// proxyOverallDeadline caps the whole retry loop. The orchestrator
+	// client timeout is also 60s and cancels this request; the cap still
+	// applies when that cancellation is not what stops the sleep.
+	proxyOverallDeadline = 60 * time.Second
 )
 
+func waitOrAbandoned(ctx context.Context, d time.Duration) bool {
+	if ctx.Err() != nil {
+		return false
+	}
+	if d <= 0 {
+		return true
+	}
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
+}
+
+func stopProxyRetries(w http.ResponseWriter, requestID, functionName string, attempts, retries int, started time.Time, reason error) {
+	retryMs := time.Since(started).Milliseconds()
+	log.Printf("[function_proxy] stop retries requestID=%s function=%s attempts=%d retries=%d retry_ms=%d reason=%v",
+		requestID, functionName, attempts, retries, retryMs, reason)
+	w.Header().Set("X-Proxy-Attempts", strconv.Itoa(attempts))
+	w.Header().Set("X-Proxy-Retries", strconv.Itoa(retries))
+	w.Header().Set("X-Proxy-Retry-Ms", strconv.FormatInt(retryMs, 10))
+	httputil.Errorf(w, http.StatusGatewayTimeout, "proxy retries stopped after %d attempts (%d ms): %v", attempts, retryMs, reason)
+}
+
+func setProxyBudgetHeaders(h http.Header, attempts, retries int, started time.Time) {
+	h.Set("X-Proxy-Attempts", strconv.Itoa(attempts))
+	h.Set("X-Proxy-Retries", strconv.Itoa(retries))
+	h.Set("X-Proxy-Retry-Ms", strconv.FormatInt(time.Since(started).Milliseconds(), 10))
+}
 
 func NewHandlerFunc(config types.FaaSConfig, resolver *handlers.InvokeResolver, fs *handlers.FunctionStore) http.HandlerFunc {
 	if resolver == nil {
@@ -58,7 +94,7 @@ func NewHandlerFunc(config types.FaaSConfig, resolver *handlers.InvokeResolver, 
 				KeepAlive: 30 * time.Second,
 			}).DialContext(ctx, network, addr)
 			if err != nil {
-				log.Printf("[function_proxy] Connection failed to %s after %v: %v", 
+				log.Printf("[function_proxy] Connection failed to %s after %v: %v",
 					addr, time.Since(start), err)
 			}
 			return conn, err
@@ -169,10 +205,13 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 
 	maxRetries := 1000
 	connectionRetries := 0
+	attempts := 0
 	var totalConnectTime int64
 
 	proxyStart := time.Now()
 	connStart := time.Now()
+	ctx, cancelOverall := context.WithTimeout(ctx, proxyOverallDeadline)
+	defer cancelOverall()
 
 	ip := strings.Split(functionAddr.Host, ":")[0]
 
@@ -188,6 +227,10 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 	backoff := baseBackoff
 
 	for connectionRetries < maxRetries {
+		if ctx.Err() != nil {
+			stopProxyRetries(w, requestID, functionName, attempts, connectionRetries, proxyStart, ctx.Err())
+			return
+		}
 		connStart = time.Now()
 		proxyReq, err = buildProxyRequest(originalReq, functionAddr, pathVars["params"], bodyBytes)
 		if err != nil {
@@ -195,35 +238,56 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 			return
 		}
 
-		// Create a timeout context for this particular request
+		// The per-attempt timeout must stay alive until the winning body is
+		// copied. Canceling it immediately closes that body and the caller
+		// sees an unexpected EOF.
 		reqCtx, cancel := context.WithTimeout(ctx, responseTimeout)
-		defer cancel()
-
+		attempts++
 		response, err = proxyClient.Do(proxyReq.WithContext(reqCtx))
 		if err != nil {
+			cancel()
 			connectionRetries++
 			log.Printf("[function_proxy] Retry %d for %s: %v (cold start: %t)", connectionRetries, functionName, err, coldStart)
-			
+			if ctx.Err() != nil {
+				stopProxyRetries(w, requestID, functionName, attempts, connectionRetries, proxyStart, ctx.Err())
+				return
+			}
+
 			// Calculate backoff with jitter
-			jitter := rand.Intn(backoff/4)
+			jitter := rand.Intn(backoff / 4)
 			sleepTime := backoff + jitter
-			time.Sleep(time.Duration(sleepTime) * time.Millisecond)
-			
+			if !waitOrAbandoned(ctx, time.Duration(sleepTime)*time.Millisecond) {
+				stopProxyRetries(w, requestID, functionName, attempts, connectionRetries, proxyStart, ctx.Err())
+				return
+			}
+
 			// Increase backoff for next retry (capped)
 			backoff = int(math.Min(float64(backoff*2), float64(maxBackoff)))
 		} else if response.StatusCode == 500 {
+			cancel()
+			if response.Body != nil {
+				response.Body.Close()
+			}
 			connectionRetries++
 			log.Printf("[function_proxy] Retry %d for %s: received 500 status", connectionRetries, functionName)
-			
+			if ctx.Err() != nil {
+				stopProxyRetries(w, requestID, functionName, attempts, connectionRetries, proxyStart, ctx.Err())
+				return
+			}
+
 			// Use same backoff strategy for 500 errors
-			jitter := rand.Intn(backoff/4)
+			jitter := rand.Intn(backoff / 4)
 			sleepTime := backoff + jitter
-			time.Sleep(time.Duration(sleepTime) * time.Millisecond)
-			
+			if !waitOrAbandoned(ctx, time.Duration(sleepTime)*time.Millisecond) {
+				stopProxyRetries(w, requestID, functionName, attempts, connectionRetries, proxyStart, ctx.Err())
+				return
+			}
+
 			backoff = int(math.Min(float64(backoff*2), float64(maxBackoff)))
 		} else if response.StatusCode == 400 {
+			defer cancel()
 			log.Printf("[function_proxy] Function %s returned 400 Bad Request", functionName)
-			
+
 			// Read the error response body
 			if response.Body != nil {
 				responseData, err := io.ReadAll(response.Body)
@@ -235,10 +299,11 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 				// Important: Create a new reader for the body since we consumed it
 				response.Body = io.NopCloser(bytes.NewBuffer(responseData))
 			}
-			
+
 			// Exit the retry loop - we'll forward this response as is
 			break
 		} else {
+			defer cancel()
 			break
 		}
 	}
@@ -256,8 +321,6 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 		return
 	}
 
-
-
 	// For 400 errors, pass through the response with the error details
 	if response.StatusCode == 400 {
 		log.Printf("[function_proxy] Forwarding 400 Bad Request from function %s", functionName)
@@ -271,21 +334,23 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 				return
 			}
 		}
-		
+
 		// Copy headers from function response
 		clientHeader := w.Header()
 		copyHeaders(clientHeader, &response.Header)
 		w.Header().Set("Content-Type", getContentType(originalReq.Header, response.Header))
 		w.Header().Set("Request-ID", requestID)
-		
+		setProxyBudgetHeaders(w.Header(), attempts, connectionRetries, proxyStart)
+		log.Printf("[function_proxy] budget requestID=%s attempts=%d retries=%d retry_ms=%d", requestID, attempts, connectionRetries, time.Since(proxyStart).Milliseconds())
+
 		// Forward the 400 status code
 		w.WriteHeader(response.StatusCode)
-		
+
 		// Forward the response body
 		if response.Body != nil {
 			io.Copy(w, response.Body)
 		}
-		
+
 		// Don't continue with normal response processing
 		return
 	}
@@ -335,6 +400,8 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 		w.Header().Set("Content-Type", getContentType(originalReq.Header, response.Header))
 		w.Header().Set("Request-ID", requestID)
 		w.Header().Set("isInitialized", strconv.FormatBool(isInitialized))
+		setProxyBudgetHeaders(w.Header(), attempts, connectionRetries, proxyStart)
+		log.Printf("[function_proxy] budget requestID=%s attempts=%d retries=%d retry_ms=%d", requestID, attempts, connectionRetries, time.Since(proxyStart).Milliseconds())
 
 		w.WriteHeader(response.StatusCode)
 		if response.Body != nil {
@@ -346,7 +413,7 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 // buildProxyRequest creates a request object for the proxy request, it will ensure that
 // the original request headers are preserved as well as setting openfaas system headers
 func buildProxyRequest(originalReq *http.Request, baseURL url.URL, extraPath string, body []byte) (*http.Request, error) {
-	
+
 	host := baseURL.Host
 	if baseURL.Port() == "" {
 		host = baseURL.Host + ":" + watchdogPort
@@ -364,7 +431,7 @@ func buildProxyRequest(originalReq *http.Request, baseURL url.URL, extraPath str
 		log.Printf("[ERROR] Failed to create new request: %v", err)
 		return nil, err
 	}
-	
+
 	copyHeaders(upstreamReq.Header, &originalReq.Header)
 
 	if len(originalReq.Host) > 0 && upstreamReq.Header.Get("X-Forwarded-Host") == "" {
