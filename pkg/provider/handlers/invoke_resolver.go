@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net/url"
@@ -10,13 +11,46 @@ import (
 	"github.com/containerd/containerd"
 	gocni "github.com/containerd/go-cni"
 	fecore "github.gatech.edu/faasedge/fecore/pkg"
-	"github.gatech.edu/faasedge/fecore/pkg/timec"
 	"github.gatech.edu/faasedge/fecore/pkg/semaphore"
+	"github.gatech.edu/faasedge/fecore/pkg/timec"
 )
 
+// sleepWithin waits for d or for ctx to end. A false result means the caller
+// must stop: the request deadline or client cancellation already fired.
+func sleepWithin(ctx context.Context, d time.Duration) bool {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if ctx.Err() != nil {
+		return false
+	}
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
+}
+
+// pollUntil returns when poll is true. Cancellation and the request deadline
+// both end the wait with ctx.Err(); the caller has not been given a replica.
+func pollUntil(ctx context.Context, interval time.Duration, poll func() bool) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	for {
+		if poll() {
+			return nil
+		}
+		if !sleepWithin(ctx, interval) {
+			return ctx.Err()
+		}
+	}
+}
+
 const watchdogPort = 8080
-
-
 
 type InvokeResolver struct {
 	client *containerd.Client
@@ -26,17 +60,17 @@ type InvokeResolver struct {
 
 // Define DependencyInfo struct to match the JSON structure
 type DependencyInfo struct {
-	SenderVDAG   string `json:"sender_vdag"`
-	SenderSeq    string    `json:"sender_seq"`
-	FecoreIP     string `json:"fecore_ip"`
-	FecorePort   string    `json:"fecore_port"`
+	SenderVDAG string `json:"sender_vdag"`
+	SenderSeq  string `json:"sender_seq"`
+	FecoreIP   string `json:"fecore_ip"`
+	FecorePort string `json:"fecore_port"`
 }
 
 // DataCentricDependency represents the parsed data-centric dependency information
 type DataCentricDependency struct {
-	SenderVDAG  string
-	SenderSeq   string
-	Key         string
+	SenderVDAG string
+	SenderSeq  string
+	Key        string
 }
 
 func parseDataCentricDependency(dep string) (*DataCentricDependency, error) {
@@ -44,7 +78,7 @@ func parseDataCentricDependency(dep string) (*DataCentricDependency, error) {
 	if len(parts) != 5 {
 		return nil, fmt.Errorf("invalid data-centric dependency format: expected 5 parts, got %d", len(parts))
 	}
-	
+
 	return &DataCentricDependency{
 		SenderVDAG: parts[1],
 		SenderSeq:  parts[2],
@@ -56,10 +90,13 @@ func NewInvokeResolver(client *containerd.Client, cni gocni.CNI, fs *FunctionSto
 	return &InvokeResolver{client: client, cni: cni, fs: fs}
 }
 
-func (i *InvokeResolver) Resolve(functionName string, requestID string, dependencies []DependencyInfo, vDAGID string, 
-	sequenceID string, releaseLocalState bool, reserveLocalState bool, dataCentricDependency string) (url.URL, bool, bool, error) {
+func (i *InvokeResolver) Resolve(functionName string, requestID string, dependencies []DependencyInfo, vDAGID string,
+	sequenceID string, releaseLocalState bool, reserveLocalState bool, dataCentricDependency string, ctx context.Context) (url.URL, bool, bool, error) {
 
 	defer timec.RecordDuration("(invoke_resolver.go) Resolve() <requestID="+requestID+">", time.Now())
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	actualFunctionName := functionName
 	log.Printf("[Resolve] Resolving <function=%q, vDAGID=%s, sequenceID=%s> (requestID=%s)\n", actualFunctionName, vDAGID, sequenceID, requestID)
 
@@ -68,6 +105,12 @@ func (i *InvokeResolver) Resolve(functionName string, requestID string, dependen
 		dep := dependencies[0]
 		log.Printf("[Resolve] Handling dependency direct mode - SenderVDAG: %s, SenderSeq: %s", dep.SenderVDAG, dep.SenderSeq)
 		for {
+			// Check before GetInvocationDetails: that call claims an idle
+			// predecessor container, and a canceled request must not keep it.
+			if err := ctx.Err(); err != nil {
+				log.Printf("[Resolve] dependency wait canceled requestID=%s err=%v", requestID, err)
+				return url.URL{}, false, false, fmt.Errorf("dependency wait canceled: %w", err)
+			}
 			containerIP, isRunning := i.fs.GetInvocationDetails(actualFunctionName, dep.SenderVDAG, dep.SenderSeq)
 			if !isRunning && containerIP != "" {
 				log.Printf("[Resolve] Using idle dependent container %s - SenderVDAG: %s, SenderSeq: %s", containerIP, dep.SenderVDAG, dep.SenderSeq)
@@ -80,18 +123,25 @@ func (i *InvokeResolver) Resolve(functionName string, requestID string, dependen
 				urlStr := fmt.Sprintf("http://%s:%d", replicaIP, watchdogPort)
 				urlRes, err := url.Parse(urlStr)
 				if err != nil {
+					_ = i.fs.UpdateReplicaStatusInactive(actualFunctionName, replicaIP, requestID)
 					return url.URL{}, false, true, err
 				}
 				return *urlRes, coldStart, true, nil
 			} else if !isRunning && containerIP == "" {
 				log.Printf("[Resolve] Dependent container has not been executed yet - SenderVDAG: %s, SenderSeq: %s", dep.SenderVDAG, dep.SenderSeq)
-				time.Sleep(10 * time.Millisecond)
+				if !sleepWithin(ctx, 10*time.Millisecond) {
+					log.Printf("[Resolve] dependency wait canceled requestID=%s err=%v", requestID, ctx.Err())
+					return url.URL{}, false, false, fmt.Errorf("dependency wait canceled: %w", ctx.Err())
+				}
 			} else if containerIP == "Unknown" {
 				log.Printf("[Resolve] Dependent container %s is unknown - SenderVDAG: %s, SenderSeq: %s", containerIP, dep.SenderVDAG, dep.SenderSeq)
 				break
 			} else {
 				log.Printf("[Resolve] Dependent container %s is running - SenderVDAG: %s, SenderSeq: %s", containerIP, dep.SenderVDAG, dep.SenderSeq)
-				time.Sleep(3 * time.Millisecond)
+				if !sleepWithin(ctx, 3*time.Millisecond) {
+					log.Printf("[Resolve] dependency wait canceled requestID=%s err=%v", requestID, ctx.Err())
+					return url.URL{}, false, false, fmt.Errorf("dependency wait canceled: %w", ctx.Err())
+				}
 			}
 		}
 	} else if dataCentricDependency != "" {
@@ -121,6 +171,10 @@ func (i *InvokeResolver) Resolve(functionName string, requestID string, dependen
 			sem, err = semaphore.Open(semName, semaphore.O_RDWR, 0666, 0)
 			if err != nil {
 				if strings.Contains(err.Error(), "No such file or directory") {
+					if err := ctx.Err(); err != nil {
+						log.Printf("[Resolve] data-centric wait canceled requestID=%s err=%v", requestID, err)
+						return url.URL{}, false, false, fmt.Errorf("data-centric wait canceled: %w", err)
+					}
 					if time.Now().After(deadline) {
 						log.Printf("[Resolve] Timed out waiting for semaphore %s", semName)
 						return url.URL{}, false, false, fmt.Errorf("timed out waiting for data-centric semaphore %s", semName)
@@ -129,7 +183,10 @@ func (i *InvokeResolver) Resolve(functionName string, requestID string, dependen
 						log.Printf("[Resolve] Semaphore %s not yet created, waiting...", semName)
 						nextLog = time.Now().Add(time.Second)
 					}
-					time.Sleep(20 * time.Millisecond)
+					if !sleepWithin(ctx, 20*time.Millisecond) {
+						log.Printf("[Resolve] data-centric wait canceled requestID=%s err=%v", requestID, ctx.Err())
+						return url.URL{}, false, false, fmt.Errorf("data-centric wait canceled: %w", ctx.Err())
+					}
 					continue
 				}
 				log.Printf("[Resolve] Error opening semaphore %s: %v", semName, err)
@@ -148,16 +205,14 @@ func (i *InvokeResolver) Resolve(functionName string, requestID string, dependen
 				log.Printf("[Resolve] Error releasing semaphore %s: %v", semName, err)
 				return url.URL{}, false, false, fmt.Errorf("failed to release semaphore: %v", err)
 			}
-			
+
 			// Set up cleanup
 			defer sem.Close()
-			
+
 			log.Printf("[Resolve] Successfully verified semaphore %s state", semName)
 			break
 		}
 	}
-
-	
 
 	namespace := getNamespace(functionName, fecore.DefaultFunctionNamespace)
 
@@ -176,20 +231,38 @@ func (i *InvokeResolver) Resolve(functionName string, requestID string, dependen
 	var replicaIP string
 	var err error
 	var coldStart bool
+	var hasIdle bool
 
-	// Try to get an idle replica atomically
-	replicaName, replicaIP, hasIdle, err := i.fs.GetIdleReplicaAtomic(actualFunctionName, requestID)
-	if err != nil {
-		log.Printf("[Invoke] Error retrieving idle replica for Function '%s': %s", function.name, err)
-		return url.URL{}, false, false, err
-	}
-
-	if hasIdle {
-		coldStart = false
-		log.Printf("[Invoke] Using idle replica '%s' (%s) for Function '%s' <requestID=%s>", replicaName, replicaIP, function.name, requestID)
-	} else {
+	// Prefer an idle replica. A direct reservation must not grow the deployed
+	// replica budget: once that budget is full, wait for a replica that is
+	// already part of it instead of creating another CPU and memory allowance.
+	for {
+		if err := ctx.Err(); err != nil {
+			return url.URL{}, false, false, fmt.Errorf("no eligible replica: %w", err)
+		}
+		replicaName, replicaIP, hasIdle, err = i.fs.GetIdleReplicaAtomic(actualFunctionName, requestID)
+		if err != nil {
+			log.Printf("[Invoke] Error retrieving idle replica for Function '%s': %s", function.name, err)
+			return url.URL{}, false, false, err
+		}
+		if hasIdle {
+			coldStart = false
+			log.Printf("[Invoke] Using idle replica '%s' (%s) for Function '%s' <requestID=%s>", replicaName, replicaIP, function.name, requestID)
+			break
+		}
+		if i.fs.AtReplicaBudget(actualFunctionName) {
+			log.Printf("[Invoke] no eligible replica for Function '%s' within the deployed budget; waiting <requestID=%s>", function.name, requestID)
+			if !sleepWithin(ctx, 10*time.Millisecond) {
+				return url.URL{}, false, false, fmt.Errorf("no eligible replica: %w", ctx.Err())
+			}
+			continue
+		}
 		coldStart = true
 		log.Printf("[Invoke] Creating new replica for Function '%s' <requestID=%s>", function.name, requestID)
+		break
+	}
+
+	if !hasIdle {
 		startTime := time.Now()
 		replicaName, err = createReplica(i.client, i.cni, i.fs, &function, requestID, true)
 		if err != nil {

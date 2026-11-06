@@ -251,17 +251,18 @@ func deploy(ctx context.Context, req types.FunctionDeployment, client *container
 	for i := 0; i < initialReplicas; i++ {
 		replicaName, createReplicaStatus := createReplica(client, cni, fs, fn, "Deploy", false)
 		if createReplicaStatus != nil {
-			log.Printf("[deploy] Failed to create replica %d/%d for Function '%s': %s", 
+			log.Printf("[deploy] Failed to create replica %d/%d for Function '%s': %s",
 				i+1, initialReplicas, fn.name, createReplicaStatus)
 			return createReplicaStatus
 		}
 		sendReplicaUpdateAsync(fs.fecoreIP, fs.fecorePort, fs.stateflowIP, fs.stateflowPort, fn.name, initialReplicas)
-		log.Printf("[deploy] Created container '%s' for Function '%s' (%d/%d)", 
+		log.Printf("[deploy] Created container '%s' for Function '%s' (%d/%d)",
 			replicaName, fn.name, i+1, initialReplicas)
 	}
 
 	fn.replicas = initialReplicas
-	log.Printf("[deploy] Successfully created %d replicas for Function '%s'", 
+	fn.deployedReplicas = initialReplicas
+	log.Printf("[deploy] Successfully created %d replicas for Function '%s'",
 		initialReplicas, fn.name)
 	return nil
 }

@@ -138,6 +138,9 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 	/* Begin function replica setup */
 	fnSetupStart := time.Now()
 	ctx := originalReq.Context()
+	// The same 60s budget covers resolver waits and the later proxy retries.
+	ctx, cancelOverall := context.WithTimeout(ctx, proxyOverallDeadline)
+	defer cancelOverall()
 	// State management: get userID
 	vDAGID := originalReq.Header.Get("vDAGID")
 	workflowID := originalReq.Header.Get("workflowID")
@@ -189,18 +192,30 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 
 	dataCentricDependency := originalReq.Header.Get("data-centric-dependency")
 
-	functionAddr, coldStart, isInitialized, resolveErr := resolver.Resolve(functionName, requestID, dependencies, vDAGID, sequenceID, releaseLocalState, reserveLocalState, dataCentricDependency)
+	// Finish the body before any wait. The server notices a client close only
+	// after this request's body has been consumed; otherwise a canceled caller
+	// leaves the resolver blocked until the 60s deadline.
+	var bodyBytes []byte
+	if originalReq.Body != nil {
+		bodyBytes, _ = io.ReadAll(originalReq.Body)
+		originalReq.Body.Close()
+	}
+
+	functionAddr, coldStart, isInitialized, resolveErr := resolver.Resolve(functionName, requestID, dependencies, vDAGID, sequenceID, releaseLocalState, reserveLocalState, dataCentricDependency, ctx)
+	var replicaReleased bool
+	defer func() {
+		if resolveErr != nil || replicaReleased || functionAddr.Host == "" {
+			return
+		}
+		ip := strings.Split(functionAddr.Host, ":")[0]
+		if relErr := fs.UpdateReplicaStatusInactive(functionName, ip, requestID); relErr != nil {
+			log.Printf("[function_proxy] release on exit requestID=%s function=%s ip=%s err=%v", requestID, functionName, ip, relErr)
+		}
+	}()
 	if resolveErr != nil {
 		log.Printf("resolver error: no endpoints for %s: %s\n", functionName, resolveErr.Error())
 		httputil.Errorf(w, http.StatusServiceUnavailable, "No endpoints available for: %s.", functionName)
 		return
-	}
-
-	// Read the original request body
-	var bodyBytes []byte
-	if originalReq.Body != nil {
-		bodyBytes, _ = io.ReadAll(originalReq.Body)
-		originalReq.Body.Close() // Close original request body
 	}
 
 	maxRetries := 1000
@@ -210,8 +225,6 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 
 	proxyStart := time.Now()
 	connStart := time.Now()
-	ctx, cancelOverall := context.WithTimeout(ctx, proxyOverallDeadline)
-	defer cancelOverall()
 
 	ip := strings.Split(functionAddr.Host, ":")[0]
 
@@ -327,6 +340,7 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 		// Update replica status regardless of response status
 		ip = strings.Split(functionAddr.Host, ":")[0]
 		if proxyReq != nil && proxyReq.URL != nil {
+			replicaReleased = true
 			err = fs.UpdateReplicaStatusInactive(functionName, ip, requestID)
 			if err != nil {
 				log.Printf("[function_proxy] Unable to update function replica status '%s': %s\n", proxyReq.URL.String(), err.Error())
@@ -378,6 +392,7 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 
 	ip = strings.Split(functionAddr.Host, ":")[0]
 	if proxyReq != nil && proxyReq.URL != nil { // Check if proxyReq and proxyReq.URL are not nil
+		replicaReleased = true
 		err = fs.UpdateReplicaStatusInactive(functionName, ip, requestID)
 		if err != nil {
 			log.Printf("[function_proxy] Unable to update function replica status '%s': %s\n", proxyReq.URL.String(), err.Error())

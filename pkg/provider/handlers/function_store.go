@@ -341,8 +341,12 @@ func (fs *FunctionStore) UpdateReplicaStatusInactive(fn string, ip string, reque
 	fs.dfMu.Lock()
 	defer fs.dfMu.Unlock()
 
+	fnState := fs.deployedFunctions[fn]
+	if fnState == nil || fnState.activeReplicas == nil {
+		return fmt.Errorf("[UpdateReplicaStatusInactive] function %s is not deployed", fn)
+	}
 	cn := ""
-	for c, cIp := range fs.deployedFunctions[fn].activeReplicas {
+	for c, cIp := range fnState.activeReplicas {
 		if cIp == ip {
 			cn = c
 			break
@@ -351,9 +355,15 @@ func (fs *FunctionStore) UpdateReplicaStatusInactive(fn string, ip string, reque
 	if cn == "" {
 		return fmt.Errorf("[UpdateReplicaStatusInactive] Unable to get function %s container %s in active set", fn, cn)
 	}
-	delete(fs.deployedFunctions[fn].activeReplicas, cn)
-	fs.deployedFunctions[fn].idleReplicas[cn] = ip
-	fs.deployedFunctions[fn].idleReplicasTs[cn] = time.Now()
+	delete(fnState.activeReplicas, cn)
+	if fnState.idleReplicas == nil {
+		fnState.idleReplicas = map[string]string{}
+	}
+	if fnState.idleReplicasTs == nil {
+		fnState.idleReplicasTs = map[string]time.Time{}
+	}
+	fnState.idleReplicas[cn] = ip
+	fnState.idleReplicasTs[cn] = time.Now()
 	return nil
 }
 
@@ -533,6 +543,18 @@ func getContainers(f *Function) []storage.Container {
 // 	return nil
 // }
 
+// AtReplicaBudget reports that this function already has its deployed replica
+// count. Zero deployedReplicas preserves the historical cold-start path.
+func (fs *FunctionStore) AtReplicaBudget(fn string) bool {
+	fs.dfMu.Lock()
+	defer fs.dfMu.Unlock()
+	function, exists := fs.deployedFunctions[fn]
+	if !exists || function.deployedReplicas <= 0 {
+		return false
+	}
+	return function.replicas >= function.deployedReplicas
+}
+
 // GetIdleReplicaAtomic attempts to get an idle replica atomically, returning empty strings if none available
 func (fs *FunctionStore) GetIdleReplicaAtomic(fn string, requestID string) (string, string, bool, error) {
 	defer timec.RecordDuration("(function_store.go) GetIdleReplicaAtomic() <requestID="+requestID+">", time.Now())
@@ -558,6 +580,17 @@ func (fs *FunctionStore) GetIdleReplicaAtomic(fn string, requestID string) (stri
 			continue
 		} else {
 			name = k
+			break
+		}
+	}
+
+	if name == "" && function.deployedReplicas > 0 && function.replicas >= function.deployedReplicas && len(function.idleReplicas) > 0 {
+		// Direct reservation has pinned every idle replica. Another container
+		// would add a CPU and memory allowance past the deployed budget.
+		for k, v := range function.idleReplicas {
+			name = k
+			ip = v
+			log.Printf("[GetIdleReplicaAtomic] reusing direct-reserved idle replica %s (%s) for %s within deployed budget %d", name, ip, fn, function.deployedReplicas)
 			break
 		}
 	}

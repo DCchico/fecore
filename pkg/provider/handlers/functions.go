@@ -16,26 +16,27 @@ import (
 )
 
 type Function struct {
-	name           string
-	namespace      string
-	image          string
-	imageFiles     []string
-	pid            map[string]uint32
-	replicas       int
-	coldReplicas   []string // replicas that have not been initialized yet
-	activeReplicas map[string]string
-	idleReplicas   map[string]string
-	idleReplicasTs map[string]time.Time
-	IP             string // not used
-	labels         map[string]string
-	annotations    map[string]string
-	secrets        []string
-	secretsPath    string
-	envVars        map[string]string
-	envProcess     string
-	memoryLimit    int64
-	cpuLimit       int64
-	createdAt      time.Time // not used
+	name             string
+	namespace        string
+	image            string
+	imageFiles       []string
+	pid              map[string]uint32
+	replicas         int
+	deployedReplicas int      // scale.min budget; zero means a caller may cold-start
+	coldReplicas     []string // replicas that have not been initialized yet
+	activeReplicas   map[string]string
+	idleReplicas     map[string]string
+	idleReplicasTs   map[string]time.Time
+	IP               string // not used
+	labels           map[string]string
+	annotations      map[string]string
+	secrets          []string
+	secretsPath      string
+	envVars          map[string]string
+	envProcess       string
+	memoryLimit      int64
+	cpuLimit         int64
+	createdAt        time.Time // not used
 	/* State management: stickiness between userID and functionReplica
 	N to N mapping implemented in a bitmap -> 2D map array
 	*/
