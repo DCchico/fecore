@@ -58,17 +58,24 @@ func MakeDeleteHandler(client *containerd.Client, cni gocni.CNI, fs *FunctionSto
 
 		ctx := namespaces.WithNamespace(context.Background(), lookupNamespace)
 
-		// Remove each Function replica
+		// Remove each Function replica. A missing memory-map entry is a
+		// completed delete: do not walk a zero Function or hold the store lock.
 		fn, err := fs.GetDeployedFunction(name, "Delete <"+name+">")
-		fs.dfMu.Lock()
-		for rname := range fn.idleReplicas {
-			deleteReplica(ctx, client, fn, cni, rname)
+		if err != nil {
+			log.Printf("[Delete] function %s is not in the provider memory map: %v\n", name, err)
+		} else {
+			fs.dfMu.Lock()
+			for rname := range fn.idleReplicas {
+				deleteReplica(ctx, client, fn, cni, rname)
+			}
+			for rname := range fn.activeReplicas {
+				deleteReplica(ctx, client, fn, cni, rname)
+			}
+			fs.dfMu.Unlock()
 		}
-		for rname := range fn.activeReplicas {
-			deleteReplica(ctx, client, fn, cni, rname)
+		if rmErr := fs.RemoveDeployedFunction(name); rmErr != nil {
+			log.Printf("[Delete] remove %s: %v\n", name, rmErr)
 		}
-		fs.dfMu.Unlock()
-		fs.RemoveDeployedFunction(name)
 
 		log.Printf("[Delete] Deleted Function '%s'\n", name)
 	}

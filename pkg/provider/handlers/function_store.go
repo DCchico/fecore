@@ -95,12 +95,12 @@ func InitFunctionStore(storageManager storage.StorageManager) (*FunctionStore, e
 		nsMu:     sync.RWMutex{},
 		dfMu:     sync.RWMutex{},
 		//ipconfigs:         make(map[string]string),
-		deployedFunctions: make(map[string]*Function),
-		functionStats:     make(map[string]*FunctionStats),
-		storageManager:    storageManager,
-		ipconfigs:         sync.Map{},
-		statsChan:         make(chan FunctionStat, 100),
-		invocationDetails: make(map[string]map[string]map[string]string),
+		deployedFunctions:     make(map[string]*Function),
+		functionStats:         make(map[string]*FunctionStats),
+		storageManager:        storageManager,
+		ipconfigs:             sync.Map{},
+		statsChan:             make(chan FunctionStat, 100),
+		invocationDetails:     make(map[string]map[string]map[string]string),
 		invocationDetailsByIP: make(map[string]InvocationInfo),
 	}
 
@@ -271,10 +271,17 @@ func (fs *FunctionStore) RemoveDeployedFunction(name string) error {
 
 	err := fs.storageManager.DeleteFunction(name)
 	if err != nil {
+		fs.dfMu.RUnlock()
 		return err
 	}
-	for _, c := range getContainers(fn) {
-		fs.storageManager.DeleteContainer(c.Name)
+	// A name can be absent from the memory map after a provider restart or a
+	// previous delete. DeleteFunction still succeeds when no row matches, so
+	// the container walk must tolerate a nil entry. Leaving this read lock
+	// held panics the request and blocks every later delete and deploy.
+	if fn != nil {
+		for _, c := range getContainers(fn) {
+			fs.storageManager.DeleteContainer(c.Name)
+		}
 	}
 	fs.dfMu.RUnlock()
 
@@ -554,7 +561,7 @@ func (fs *FunctionStore) GetIdleReplicaAtomic(fn string, requestID string) (stri
 			break
 		}
 	}
-	
+
 	if name == "" {
 		return "", "", false, nil
 	}
