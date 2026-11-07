@@ -585,8 +585,10 @@ func (fs *FunctionStore) GetIdleReplicaAtomic(fn string, requestID string) (stri
 	}
 
 	if name == "" && function.deployedReplicas > 0 && function.replicas >= function.deployedReplicas && len(function.idleReplicas) > 0 {
-		// Direct reservation has pinned every idle replica. Another container
-		// would add a CPU and memory allowance past the deployed budget.
+		// Every idle replica is direct-reserved. Reclaim one inside the
+		// deployed budget instead of creating another allowance. The
+		// reservation list stays, and the process keeps each key's object:
+		// the original key's next direct dependency is routed back here.
 		for k, v := range function.idleReplicas {
 			name = k
 			ip = v
