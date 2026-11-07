@@ -514,6 +514,10 @@ func (h *StateProxyHandler) handlePutState(req *StateRequest) (StateResponse, er
 // An empty prefix stays sn_<vdag>, which is the SocialNet object.
 // prefix=bfs addresses bfs_<vdag>. Any other prefix is refused.
 // Camera frame semaphores and the 50MB segment are not used.
+//
+// The limit is the maximum accepted object payload, not a buffer size.
+// SocialNet stays at 1MiB. BFS may carry a multi-megabyte distance object.
+// A larger payload is refused and is not truncated.
 func objectPrefix(prefix string) (string, error) {
 	if prefix == "" {
 		return "sn", nil
@@ -522,6 +526,13 @@ func objectPrefix(prefix string) (string, error) {
 		return "", fmt.Errorf("prefix")
 	}
 	return prefix, nil
+}
+
+func objectLimit(prefix string) int {
+	if prefix == "bfs" {
+		return 16 << 20
+	}
+	return 1 << 20
 }
 
 func (h *StateProxyHandler) HandleSocialState(w http.ResponseWriter, r *http.Request) {
@@ -550,7 +561,7 @@ func (h *StateProxyHandler) HandleSocialState(w http.ResponseWriter, r *http.Req
 		return
 	}
 	path := "/dev/shm/" + prefix + "_" + req.VDAGID
-	const maxBytes = 1 << 20
+	maxBytes := objectLimit(prefix)
 	switch strings.ToLower(req.Op) {
 	case "get", "":
 		raw, err := os.ReadFile(path)
@@ -570,7 +581,11 @@ func (h *StateProxyHandler) HandleSocialState(w http.ResponseWriter, r *http.Req
 		json.NewEncoder(w).Encode(StateResponse{Success: true, Data: raw[8 : 8+size]})
 	case "put":
 		if len(req.Data) > maxBytes {
-			h.sendErrorResponse(w, "social state exceeds 1MiB", fmt.Errorf("%d", len(req.Data)))
+			message := fmt.Sprintf("state exceeds %d bytes", maxBytes)
+			if prefix == "sn" {
+				message = "social state exceeds 1MiB"
+			}
+			h.sendErrorResponse(w, message, fmt.Errorf("%d", len(req.Data)))
 			return
 		}
 		buf := make([]byte, 8+len(req.Data))
