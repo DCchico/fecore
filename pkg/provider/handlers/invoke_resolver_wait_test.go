@@ -116,4 +116,7 @@ func TestReservedIdleReusesTheDeployedBudget(t *testing.T) {
 	if len(fs.deployedFunctions["timeline"].idleReplicas) != 2 {
 		t.Fatal("release did not return the replica to idle")
 	}
+	if !contains(fs.dependentContainers, ip) {
+		t.Fatal("reclaim cleared the direct reservation")
+	}
 }
