@@ -510,18 +510,31 @@ func (h *StateProxyHandler) handlePutState(req *StateRequest) (StateResponse, er
 	}, nil
 }
 
-// HandleSocialState reads and writes one bounded timeline index.
-// The segment name is sn_<vdag>. A missing segment is an immediate miss.
+// HandleSocialState reads and writes one bounded object.
+// An empty prefix stays sn_<vdag>, which is the SocialNet object.
+// prefix=bfs addresses bfs_<vdag>. Any other prefix is refused.
 // Camera frame semaphores and the 50MB segment are not used.
+func objectPrefix(prefix string) (string, error) {
+	if prefix == "" {
+		return "sn", nil
+	}
+	if prefix != "sn" && prefix != "bfs" {
+		return "", fmt.Errorf("prefix")
+	}
+	return prefix, nil
+}
+
 func (h *StateProxyHandler) HandleSocialState(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	var req struct {
 		VDAGID string `json:"vdag_id"`
 		Op     string `json:"op"`
+		Prefix string `json:"prefix"`
 		Data   []byte `json:"data"`
 	}
 	if r.Method == "GET" {
 		req.VDAGID = r.URL.Query().Get("vdag_id")
+		req.Prefix = r.URL.Query().Get("prefix")
 		req.Op = "get"
 	} else if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		h.sendErrorResponse(w, "invalid social state request", err)
@@ -531,7 +544,12 @@ func (h *StateProxyHandler) HandleSocialState(w http.ResponseWriter, r *http.Req
 		h.sendErrorResponse(w, "invalid social state request", fmt.Errorf("vdag_id"))
 		return
 	}
-	path := "/dev/shm/sn_" + req.VDAGID
+	prefix, err := objectPrefix(req.Prefix)
+	if err != nil {
+		h.sendErrorResponse(w, "invalid social state request", err)
+		return
+	}
+	path := "/dev/shm/" + prefix + "_" + req.VDAGID
 	const maxBytes = 1 << 20
 	switch strings.ToLower(req.Op) {
 	case "get", "":
@@ -571,7 +589,7 @@ func (h *StateProxyHandler) HandleSocialState(w http.ResponseWriter, r *http.Req
 // Publish a complete immutable copy. Local readers and direct-cache stamps
 // must never observe a truncated prefix or an in-place partially written body.
 func publishSocialCopy(path string, data []byte) error {
-	temporary, err := os.CreateTemp("/dev/shm", "sn-publish-*")
+	temporary, err := os.CreateTemp("/dev/shm", "state-publish-*")
 	if err != nil {
 		return err
 	}
