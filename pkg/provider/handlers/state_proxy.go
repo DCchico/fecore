@@ -512,7 +512,8 @@ func (h *StateProxyHandler) handlePutState(req *StateRequest) (StateResponse, er
 
 // HandleSocialState reads and writes one bounded object.
 // An empty prefix stays sn_<vdag>, which is the SocialNet object.
-// prefix=bfs addresses bfs_<vdag>. Any other prefix is refused.
+// prefix=bfs addresses bfs_<vdag>. prefix=fed addresses fed_<vdag>.
+// Any other prefix is refused.
 // Camera frame semaphores and the 50MB segment are not used.
 //
 // The limit is the maximum accepted object payload, not a buffer size.
@@ -522,14 +523,16 @@ func objectPrefix(prefix string) (string, error) {
 	if prefix == "" {
 		return "sn", nil
 	}
-	if prefix != "sn" && prefix != "bfs" {
+	if prefix != "sn" && prefix != "bfs" && prefix != "fed" {
 		return "", fmt.Errorf("prefix")
 	}
 	return prefix, nil
 }
 
 func objectLimit(prefix string) int {
-	if prefix == "bfs" {
+	// BFS distance objects and federation running-aggregates are both
+	// multi-megabyte. SocialNet stays at 1MiB. The caps are independent.
+	if prefix == "bfs" || prefix == "fed" {
 		return 16 << 20
 	}
 	return 1 << 20

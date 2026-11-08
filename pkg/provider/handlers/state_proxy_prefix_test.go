@@ -129,3 +129,56 @@ func TestBFSMultiMegabyteReplaceIsExact(t *testing.T) {
 		t.Fatal("oversize put replaced the committed object")
 	}
 }
+
+func TestFedPrefixDoesNotWriteSocialOrBFSFile(t *testing.T) {
+	vdag := "unit-fed-prefix"
+	os.Remove("/dev/shm/sn_" + vdag)
+	os.Remove("/dev/shm/bfs_" + vdag)
+	os.Remove("/dev/shm/fed_" + vdag)
+	defer os.Remove("/dev/shm/sn_" + vdag)
+	defer os.Remove("/dev/shm/bfs_" + vdag)
+	defer os.Remove("/dev/shm/fed_" + vdag)
+	handler := NewStateProxyHandler()
+	payload := bytes.Repeat([]byte("f"), 2<<20)
+	body, _ := json.Marshal(map[string]interface{}{
+		"vdag_id": vdag,
+		"op":      "put",
+		"prefix":  "fed",
+		"data":    payload,
+	})
+	put := httptest.NewRecorder()
+	handler.HandleSocialState(put, httptest.NewRequest(http.MethodPost, "/social-state", bytes.NewReader(body)))
+	var stored StateResponse
+	if err := json.Unmarshal(put.Body.Bytes(), &stored); err != nil || !stored.Success {
+		t.Fatalf("fed put %+v %v", stored, err)
+	}
+	if _, err := os.Stat("/dev/shm/sn_" + vdag); !os.IsNotExist(err) {
+		t.Fatalf("social file was written: %v", err)
+	}
+	if _, err := os.Stat("/dev/shm/bfs_" + vdag); !os.IsNotExist(err) {
+		t.Fatalf("bfs file was written: %v", err)
+	}
+	got := httptest.NewRecorder()
+	handler.HandleSocialState(got, httptest.NewRequest(http.MethodGet, "/social-state?vdag_id="+vdag+"&prefix=fed", nil))
+	var fetched StateResponse
+	if err := json.Unmarshal(got.Body.Bytes(), &fetched); err != nil || !fetched.Success || !bytes.Equal(fetched.Data, payload) {
+		t.Fatalf("fed get length %d err %v", len(fetched.Data), err)
+	}
+	over, _ := json.Marshal(map[string]interface{}{
+		"vdag_id": vdag,
+		"op":      "put",
+		"prefix":  "fed",
+		"data":    bytes.Repeat([]byte("x"), objectLimit("fed")+1),
+	})
+	rejected := httptest.NewRecorder()
+	handler.HandleSocialState(rejected, httptest.NewRequest(http.MethodPost, "/social-state", bytes.NewReader(over)))
+	var tooBig StateResponse
+	if err := json.Unmarshal(rejected.Body.Bytes(), &tooBig); err != nil || tooBig.Success {
+		t.Fatalf("oversize fed object was accepted: %+v %v", tooBig, err)
+	}
+	got = httptest.NewRecorder()
+	handler.HandleSocialState(got, httptest.NewRequest(http.MethodGet, "/social-state?vdag_id="+vdag+"&prefix=fed", nil))
+	if err := json.Unmarshal(got.Body.Bytes(), &fetched); err != nil || !bytes.Equal(fetched.Data, payload) {
+		t.Fatal("oversize fed put replaced the committed object")
+	}
+}
