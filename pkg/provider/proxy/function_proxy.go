@@ -201,7 +201,9 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 		originalReq.Body.Close()
 	}
 
+	resolveStart := time.Now()
 	functionAddr, coldStart, isInitialized, resolveErr := resolver.Resolve(functionName, requestID, dependencies, vDAGID, sequenceID, releaseLocalState, reserveLocalState, dataCentricDependency, ctx)
+	resolveDur := time.Since(resolveStart)
 	var replicaReleased bool
 	defer func() {
 		if resolveErr != nil || replicaReleased || functionAddr.Host == "" {
@@ -256,7 +258,13 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 		// sees an unexpected EOF.
 		reqCtx, cancel := context.WithTimeout(ctx, responseTimeout)
 		attempts++
+		upstreamStart := time.Now()
 		response, err = proxyClient.Do(proxyReq.WithContext(reqCtx))
+		upstreamDur := time.Since(upstreamStart)
+		if err == nil && response != nil && response.StatusCode != 500 {
+			log.Printf("FEDTRACE layer=provider vdag=%s seq=%s resolve_ns=%d upstream_ns=%d attempts=%d",
+				vDAGID, sequenceID, resolveDur.Nanoseconds(), upstreamDur.Nanoseconds(), attempts)
+		}
 		if err != nil {
 			cancel()
 			connectionRetries++
@@ -376,6 +384,7 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 		return
 	}
 
+	afterUpstream := time.Now()
 	log.Printf("[function_proxy] Success connecting to function <requestID=%s, execTime=%d>", requestID, fnExecTime)
 
 	proxyElapsed := time.Since(proxyStart)
@@ -387,13 +396,19 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 
 	log.Printf("[function_proxy] Invocation of '%s' (coldStart: %t) took %d ms with %d retries \n", functionName, coldStart, proxyElapsed.Milliseconds(), connectionRetries)
 	fs.RecordInvocationTime(proxyElapsed, coldStart)
+	statsStart := time.Now()
 	log.Printf("[function_proxy] CALLING UpdateFunctionStats(%s, %d, %d)", functionName, fnSetupTime, fnExecTime)
 	fs.UpdateFunctionStats(functionName, fnSetupTime, fnExecTime)
+	statsDur := time.Since(statsStart)
 
 	ip = strings.Split(functionAddr.Host, ":")[0]
 	if proxyReq != nil && proxyReq.URL != nil { // Check if proxyReq and proxyReq.URL are not nil
 		replicaReleased = true
+		inactiveStart := time.Now()
 		err = fs.UpdateReplicaStatusInactive(functionName, ip, requestID)
+		inactiveDur := time.Since(inactiveStart)
+		log.Printf("FEDTRACE layer=provider-after vdag=%s seq=%s since_upstream_ns=%d stats_ns=%d inactive_ns=%d",
+			vDAGID, sequenceID, time.Since(afterUpstream).Nanoseconds(), statsDur.Nanoseconds(), inactiveDur.Nanoseconds())
 		if err != nil {
 			log.Printf("[function_proxy] Unable to update function replica status '%s': %s\n", proxyReq.URL.String(), err.Error())
 			httputil.Errorf(w, http.StatusInternalServerError, "Can't reach service for '%s'", functionName)
@@ -418,10 +433,19 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 		setProxyBudgetHeaders(w.Header(), attempts, connectionRetries, proxyStart)
 		log.Printf("[function_proxy] budget requestID=%s attempts=%d retries=%d retry_ms=%d", requestID, attempts, connectionRetries, time.Since(proxyStart).Milliseconds())
 
-		w.WriteHeader(response.StatusCode)
+		readStart := time.Now()
+		var body []byte
 		if response.Body != nil {
-			io.Copy(w, response.Body)
+			body, _ = io.ReadAll(response.Body)
 		}
+		readDur := time.Since(readStart)
+		w.WriteHeader(response.StatusCode)
+		writeStart := time.Now()
+		if len(body) > 0 {
+			_, _ = w.Write(body)
+		}
+		log.Printf("FEDTRACE layer=provider-copy vdag=%s seq=%s read_ns=%d write_ns=%d bytes=%d",
+			vDAGID, sequenceID, readDur.Nanoseconds(), time.Since(writeStart).Nanoseconds(), len(body))
 	}
 }
 
