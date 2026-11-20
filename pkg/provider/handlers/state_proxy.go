@@ -382,7 +382,7 @@ func (h *StateProxyHandler) handleGetState(req *StateRequest) (StateResponse, er
 
 	// Wait for semaphore to exist and be ready
 	var semPrev *semaphore.Semaphore
-	maxWaitSeconds := 10
+	maxWaitSeconds := 60
 	waitStart := time.Now()
 
 	for {
@@ -404,12 +404,28 @@ func (h *StateProxyHandler) handleGetState(req *StateRequest) (StateResponse, er
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	// Acquire the semaphore (this will block until data is available)
-	if err := semPrev.Wait(); err != nil {
-		semPrev.Close()
+	// The data-ready wait uses whatever of the 60s budget the exist-wait did not.
+	remain := time.Duration(maxWaitSeconds)*time.Second - time.Since(waitStart)
+	if remain < 0 {
+		remain = 0
+	}
+	waitErr := make(chan error, 1)
+	go func() {
+		waitErr <- semPrev.Wait()
+	}()
+	select {
+	case err := <-waitErr:
+		if err != nil {
+			semPrev.Close()
+			return StateResponse{
+				Success: false,
+				Error:   fmt.Sprintf("Failed to wait on semaphore: %v", err),
+			}, nil
+		}
+	case <-time.After(remain):
 		return StateResponse{
 			Success: false,
-			Error:   fmt.Sprintf("Failed to wait on semaphore: %v", err),
+			Error:   fmt.Sprintf("Timeout waiting for semaphore %s after %d seconds", prevFrameSemName, maxWaitSeconds),
 		}, nil
 	}
 

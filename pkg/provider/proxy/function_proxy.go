@@ -34,7 +34,7 @@ const (
 	watchdogPort        = "8080"
 	defaultContentType  = "text/plain"
 	dialTimeout         = 30 * time.Second // Increased from 10s to 30s
-	responseTimeout     = 30 * time.Second // Increased from 10s to 30s
+	responseTimeout     = 120 * time.Second // upstream function budget, outside the 90s watchdog
 	maxIdleConns        = 100
 	maxIdleConnsPerHost = 20
 	idleConnTimeout     = 30 * time.Second
@@ -42,9 +42,8 @@ const (
 	baseBackoff         = 100  // ms - Increased from 50ms to 100ms
 	maxBackoff          = 2000 // ms - Increased from 500ms to 2000ms
 	// proxyOverallDeadline caps the whole retry loop. The orchestrator
-	// client timeout is also 60s and cancels this request; the cap still
-	// applies when that cancellation is not what stops the sleep.
-	proxyOverallDeadline = 60 * time.Second
+	// client timeout is 150s. This cap is the provider's own 120s budget.
+	proxyOverallDeadline = 120 * time.Second
 )
 
 func waitOrAbandoned(ctx context.Context, d time.Duration) bool {
@@ -138,7 +137,7 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 	/* Begin function replica setup */
 	fnSetupStart := time.Now()
 	ctx := originalReq.Context()
-	// The same 60s budget covers resolver waits and the later proxy retries.
+	// The 120s budget covers resolver waits and the later proxy retries.
 	ctx, cancelOverall := context.WithTimeout(ctx, proxyOverallDeadline)
 	defer cancelOverall()
 	// State management: get userID
