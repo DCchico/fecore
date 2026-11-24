@@ -50,8 +50,36 @@ const (
 	defaultIfPrefix = "eth"
 )
 
-// defaultCNIConf is a CNI configuration that enables network access to containers (docker-bridge style)
-var defaultCNIConf = fmt.Sprintf(`
+// containerRoutes keeps the historical default route unless FECORE_CONTAINER_CIDRS
+// lists explicit destinations. An empty setting is not a host-wide egress policy.
+func containerRoutes() (string, error) {
+	raw := strings.TrimSpace(os.Getenv("FECORE_CONTAINER_CIDRS"))
+	if raw == "" {
+		return `{ "dst": "0.0.0.0/0" }`, nil
+	}
+	var lines []string
+	for _, cidr := range strings.Split(raw, ",") {
+		cidr = strings.TrimSpace(cidr)
+		if cidr == "" {
+			continue
+		}
+		if _, _, err := net.ParseCIDR(cidr); err != nil {
+			return "", fmt.Errorf("FECORE_CONTAINER_CIDRS entry %q: %w", cidr, err)
+		}
+		lines = append(lines, fmt.Sprintf(`{ "dst": "%s" }`, cidr))
+	}
+	if len(lines) == 0 {
+		return "", fmt.Errorf("FECORE_CONTAINER_CIDRS is set but empty")
+	}
+	return strings.Join(lines, ",\n                "), nil
+}
+
+func defaultCNIConf() (string, error) {
+	routes, err := containerRoutes()
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf(`
 {
     "cniVersion": "0.4.0",
     "name": "%s",
@@ -66,7 +94,7 @@ var defaultCNIConf = fmt.Sprintf(`
             "subnet": "%s",
             "dataDir": "%s",
             "routes": [
-                { "dst": "0.0.0.0/0" }
+                %s
             ]
         },
         "capabilities": {
@@ -75,7 +103,8 @@ var defaultCNIConf = fmt.Sprintf(`
       }
     ]
 }
-`, defaultNetworkName, defaultBridgeName, defaultSubnet, CNIDataDir)
+`, defaultNetworkName, defaultBridgeName, defaultSubnet, CNIDataDir, routes), nil
+}
 
 // InitNetwork writes configlist file and initializes CNI network
 func InitNetwork() (gocni.CNI, error) {
@@ -88,8 +117,12 @@ func InitNetwork() (gocni.CNI, error) {
 		}
 	}
 
+	conf, err := defaultCNIConf()
+	if err != nil {
+		return nil, err
+	}
 	netConfig := path.Join(CNIConfDir, defaultCNIConfFilename)
-	if err := ioutil.WriteFile(netConfig, []byte(defaultCNIConf), 644); err != nil {
+	if err := ioutil.WriteFile(netConfig, []byte(conf), 644); err != nil {
 		return nil, fmt.Errorf("cannot write network config: %s", defaultCNIConfFilename)
 	}
 

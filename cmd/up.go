@@ -121,7 +121,9 @@ func runUp(cmd *cobra.Command, _ []string) error {
 			}
 
 			hostIP := "0.0.0.0"
-			if len(port.HostIP) > 0 {
+			if envBind := os.Getenv("FECORE_BIND_ADDR"); envBind != "" {
+				hostIP = envBind
+			} else if len(port.HostIP) > 0 {
 				hostIP = port.HostIP
 			}
 
@@ -175,6 +177,9 @@ func makeBasicAuthFiles(wd string) error {
 
 	err = makeFile(pwdFile, authPassword)
 	if err != nil {
+		return err
+	}
+	if err = os.Chmod(pwdFile, 0600); err != nil {
 		return err
 	}
 
@@ -249,10 +254,18 @@ func startRedis(ctx context.Context) (*redis.Client, error) {
 		time.Sleep(time.Second)
 	}
 
-	// Start Redis server without protected mode and binding to all interfaces
-	cmd = exec.CommandContext(ctx, "redis-server",
-		"--protected-mode", "no",
-		"--bind", "0.0.0.0")
+	// Unset FECORE_BIND_ADDR keeps the historical wildcard. A set address
+	// also keeps loopback for local clients and does not listen on the
+	// control interface.
+	redisBind := []string{"0.0.0.0"}
+	if envBind := os.Getenv("FECORE_BIND_ADDR"); envBind != "" {
+		redisBind = []string{"127.0.0.1"}
+		if envBind != "127.0.0.1" {
+			redisBind = append(redisBind, envBind)
+		}
+	}
+	args := append([]string{"--protected-mode", "no", "--bind"}, redisBind...)
+	cmd = exec.CommandContext(ctx, "redis-server", args...)
 
 	var outb, errb bytes.Buffer
 	cmd.Stdout = &outb

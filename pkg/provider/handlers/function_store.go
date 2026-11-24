@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"os"
 	"sync"
 	"time"
 
@@ -147,6 +148,16 @@ func InitFunctionStore(storageManager storage.StorageManager) (*FunctionStore, e
 
 // Get outbound IP address of current server
 func getLocalIP() (string, error) {
+	// The host default route is CloudLab's control network. FECORE_BIND_ADDR
+	// is the experiment address this process already listens on, and it is
+	// the address advertised to the orchestrator.
+	if bind := os.Getenv("FECORE_BIND_ADDR"); bind != "" {
+		ip := net.ParseIP(bind)
+		if ip == nil || ip.To4() == nil || ip.IsUnspecified() {
+			return "", fmt.Errorf("FECORE_BIND_ADDR %q is not a specific IPv4 address", bind)
+		}
+		return ip.String(), nil
+	}
 	addrs, err := net.InterfaceAddrs()
 	if err != nil {
 		return "", err

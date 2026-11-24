@@ -61,31 +61,45 @@ func (p *Proxy) Start() error {
 
 	upstreamAddr := fmt.Sprintf("%s:%d", ipAddress, upstreamPort)
 
-	localBind := fmt.Sprintf("%s:%d", p.HostIP, p.Port)
-	log.Printf("Proxy from: %s, to: %s (%s)\n", localBind, p.Upstream, ipAddress)
-
-	l, err := net.Listen("tcp", localBind)
-	if err != nil {
-		log.Printf("Error: %s", err.Error())
-		return err
+	binds := []string{p.HostIP}
+	if p.HostIP != "0.0.0.0" && p.HostIP != "127.0.0.1" && p.HostIP != "" {
+		binds = append(binds, "127.0.0.1")
 	}
+	var listeners []net.Listener
+	for _, host := range binds {
+		localBind := net.JoinHostPort(host, fmt.Sprintf("%d", p.Port))
+		log.Printf("Proxy from: %s, to: %s (%s)\n", localBind, p.Upstream, ipAddress)
+		l, err := net.Listen("tcp4", localBind)
+		if err != nil {
+			log.Printf("Error: %s", err.Error())
+			return err
+		}
+		listeners = append(listeners, l)
+	}
+	errCh := make(chan error, len(listeners))
+	for _, ln := range listeners {
+		ln := ln
+		go func() {
+			defer ln.Close()
+			errCh <- acceptProxy(ln, upstreamAddr, p.Port)
+		}()
+	}
+	return <-errCh
+}
 
-	defer l.Close()
+func acceptProxy(l net.Listener, upstreamAddr string, port uint32) error {
 	for {
-		// Wait for a connection.
 		conn, err := l.Accept()
 		if err != nil {
-			acceptErr := fmt.Errorf("Unable to accept on %d, error: %s",
-				p.Port,
-				err.Error())
+			acceptErr := fmt.Errorf("Unable to accept on %d, error: %s", port, err.Error())
 			log.Printf("%s", acceptErr.Error())
 			return acceptErr
 		}
 
-		upstream, err := net.Dial("tcp", upstreamAddr)
-
+		upstream, err := net.Dial("tcp4", upstreamAddr)
 		if err != nil {
 			log.Printf("unable to dial to %s, error: %s", upstreamAddr, err.Error())
+			conn.Close()
 			return err
 		}
 

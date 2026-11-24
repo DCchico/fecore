@@ -6,7 +6,9 @@ package bootstrap
 import (
 	"fmt"
 	"log"
+	"net"
 	"net/http"
+	"os"
 
 	"github.com/gorilla/mux"
 	// "github.com/openfaas/faas-provider/auth"
@@ -98,13 +100,33 @@ func Serve(handlers *types.FaaSHandlers, config *types.FaaSConfig) {
 		port = *config.TCPPort
 	}
 
-	s := &http.Server{
-		Addr:           fmt.Sprintf(":%d", port),
-		ReadTimeout:    readTimeout,
-		WriteTimeout:   writeTimeout,
-		MaxHeaderBytes: http.DefaultMaxHeaderBytes, // 1MB - can be overridden by setting Server.MaxHeaderBytes.
-		Handler:        r,
+	hosts := []string{"0.0.0.0"}
+	if bind := os.Getenv("FECORE_BIND_ADDR"); bind != "" {
+		hosts = []string{bind}
+		if bind != "127.0.0.1" {
+			hosts = append(hosts, "127.0.0.1")
+		}
 	}
-
-	log.Fatal(s.ListenAndServe())
+	errCh := make(chan error, len(hosts))
+	for _, host := range hosts {
+		host := host
+		go func() {
+			addr := net.JoinHostPort(host, fmt.Sprintf("%d", port))
+			ln, err := net.Listen("tcp4", addr)
+			if err != nil {
+				errCh <- fmt.Errorf("listen %s: %w", addr, err)
+				return
+			}
+			log.Printf("HTTP listening on %s", ln.Addr())
+			srv := &http.Server{
+				Addr:           addr,
+				ReadTimeout:    readTimeout,
+				WriteTimeout:   writeTimeout,
+				MaxHeaderBytes: http.DefaultMaxHeaderBytes,
+				Handler:        r,
+			}
+			errCh <- srv.Serve(ln)
+		}()
+	}
+	log.Fatal(<-errCh)
 }
