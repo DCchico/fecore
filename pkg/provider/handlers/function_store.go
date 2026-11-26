@@ -354,6 +354,7 @@ func (fs *FunctionStore) UpdateReplicaStatusInactive(fn string, ip string, reque
 
 	fnState := fs.deployedFunctions[fn]
 	if fnState == nil || fnState.activeReplicas == nil {
+		LogOccupancy("release", requestID, fn, "", "", "", ip, "ambiguous")
 		return fmt.Errorf("[UpdateReplicaStatusInactive] function %s is not deployed", fn)
 	}
 	cn := ""
@@ -364,6 +365,7 @@ func (fs *FunctionStore) UpdateReplicaStatusInactive(fn string, ip string, reque
 		}
 	}
 	if cn == "" {
+		LogOccupancy("release", requestID, fn, "", "", "", ip, "ambiguous")
 		return fmt.Errorf("[UpdateReplicaStatusInactive] Unable to get function %s container %s in active set", fn, cn)
 	}
 	delete(fnState.activeReplicas, cn)
@@ -375,6 +377,7 @@ func (fs *FunctionStore) UpdateReplicaStatusInactive(fn string, ip string, reque
 	}
 	fnState.idleReplicas[cn] = ip
 	fnState.idleReplicasTs[cn] = time.Now()
+	LogOccupancy("release", requestID, fn, "", "", cn, ip, "released")
 	return nil
 }
 
@@ -683,6 +686,29 @@ func (fs *FunctionStore) GetInvocationDetails(functionName, vDAGID, sequenceID s
 		}
 	}
 	return "", false
+}
+
+// ContainerByIP returns the containerd id currently mapped to ip.
+// An empty result means the caller must not invent a cgroup id.
+func (fs *FunctionStore) ContainerByIP(ip string) string {
+	fs.dfMu.Lock()
+	defer fs.dfMu.Unlock()
+	for _, fn := range fs.deployedFunctions {
+		if fn == nil {
+			continue
+		}
+		for name, cip := range fn.activeReplicas {
+			if cip == ip {
+				return name
+			}
+		}
+		for name, cip := range fn.idleReplicas {
+			if cip == ip {
+				return name
+			}
+		}
+	}
+	return ""
 }
 
 // contains checks if a slice contains a specific element.

@@ -126,6 +126,7 @@ func (i *InvokeResolver) Resolve(functionName string, requestID string, dependen
 					_ = i.fs.UpdateReplicaStatusInactive(actualFunctionName, replicaIP, requestID)
 					return url.URL{}, false, true, err
 				}
+				LogOccupancy("claim", requestID, actualFunctionName, vDAGID, sequenceID, i.fs.ContainerByIP(replicaIP), replicaIP, "claimed")
 				return *urlRes, coldStart, true, nil
 			} else if !isRunning && containerIP == "" {
 				log.Printf("[Resolve] Dependent container has not been executed yet - SenderVDAG: %s, SenderSeq: %s", dep.SenderVDAG, dep.SenderSeq)
@@ -289,9 +290,11 @@ func (i *InvokeResolver) Resolve(functionName string, requestID string, dependen
 	urlStr := fmt.Sprintf("http://%s:%d", replicaIP, watchdogPort)
 	urlRes, err := url.Parse(urlStr)
 	if err != nil {
+		LogOccupancy("claim", requestID, actualFunctionName, vDAGID, sequenceID, replicaName, replicaIP, "ambiguous")
 		return url.URL{}, false, false, err
 	}
 
+	LogOccupancy("claim", requestID, actualFunctionName, vDAGID, sequenceID, replicaName, replicaIP, "claimed")
 	return *urlRes, coldStart, isInitialized, nil
 }
 
