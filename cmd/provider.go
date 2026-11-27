@@ -98,6 +98,17 @@ func makeProviderCmd() *cobra.Command {
 		if err != nil {
 			return err
 		}
+		pool, note, poolErr := handlers.DiscoverFunctionPool()
+		if poolErr != nil {
+			log.Printf("[corepool] unavailable, dedicated placement will fail closed: %v", poolErr)
+			handlers.SetDedicatedPool(handlers.ClosedPool(poolErr.Error()))
+		} else {
+			if adoptErr := handlers.AdoptRunningCgroups(pool); adoptErr != nil {
+				log.Printf("[corepool] reconstruction failed, dedicated placement will fail closed: %v", adoptErr)
+			}
+			handlers.SetDedicatedPool(pool)
+			log.Printf("[corepool] %s", note)
+		}
 
 		go func() {
 			gocron.Every(3600).Second().Do(fs.CleanupDaemon, client, cni) // TODO 200 sec hardcoded

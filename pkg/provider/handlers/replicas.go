@@ -175,25 +175,33 @@ func createReplica(client *containerd.Client, cni gocni.CNI, fs *FunctionStore, 
 		}
 	}
 
-	// Get available CPUs from environment variable or use default
+	// Dedicated placement uses one online thread of a distinct physical core.
+	// The pool is shared by every function on this provider and does not wrap.
 	var cpuSet string
 	var useCPUSet bool = false
-	
-	// Check if function needs dedicated core
+	releaseCore := func() {}
+	keepCore := false
+	defer func() {
+		if !keepCore {
+			releaseCore()
+		}
+	}()
 	if val, ok := fn.labels["com.openfaas.cpu.dedicated"]; ok && val == "true" {
-		// nosmt leaves CPUs 0-7, one logical CPU per physical core.
-		// One replica per CPU so two processes do not share a core.
-		dedicatedCore := fn.replicas % 8
-		cpuSet = strconv.Itoa(dedicatedCore)
+		core, reserveErr := ReserveDedicatedCore(name)
+		if reserveErr != nil {
+			return "", fmt.Errorf("[createReplica] no physical core for '%s': %w", name, reserveErr)
+		}
+		releaseCore = func() { ReleaseDedicatedCore(name) }
+		cpuSet = strconv.Itoa(core)
 		useCPUSet = true
-		log.Printf("[createReplica] Assigning dedicated core %d to function '%s' (replica %d)",
-			dedicatedCore, fn.name, fn.replicas)
+		log.Printf("[createReplica] Assigning physical core cpu %s to function '%s' container '%s' (cpuset is one hardware thread; partition member is not OS-wide exclusivity)",
+			cpuSet, fn.name, name)
 	}
-	log.Printf("[createReplica] Creating new container for Function '%s' with memory limit: %d bytes, CPU limit: %d milliCPU, CPU set: %s", 
+	log.Printf("[createReplica] Creating new container for Function '%s' with memory limit: %d bytes, CPU limit: %d milliCPU, CPU set: %s",
 		name, fn.memoryLimit, fn.cpuLimit, cpuSet)
 
 	var container containerd.Container
-		// Only add CPU affinity if needed
+	// Only add CPU affinity if needed
 	if useCPUSet {
 		container, err = client.NewContainer(
 			ctx,
@@ -241,13 +249,15 @@ func createReplica(client *containerd.Client, cni gocni.CNI, fs *FunctionStore, 
 		)
 	}
 
-
 	if err != nil {
 		return "", fmt.Errorf("[createReplica] Unable to create container '%s': %w", name, err)
 	}
 
 	ip, createTaskStatus := createTask(ctx, container, requestID, cni)
 	if createTaskStatus != nil {
+		if delErr := container.Delete(ctx, containerd.WithSnapshotCleanup); delErr != nil {
+			log.Printf("[createReplica] failed to delete container '%s' after task error: %v", name, delErr)
+		}
 		return "", fmt.Errorf("[createReplica] Unable to create task for container '%s': %w", name, createTaskStatus)
 	}
 	task, err := container.Task(ctx, nil)
@@ -270,6 +280,7 @@ func createReplica(client *containerd.Client, cni gocni.CNI, fs *FunctionStore, 
 		fn.replicas += 1
 		fn.coldReplicas = append(fn.coldReplicas, ip)
 		fs.dfMu.Unlock()
+		keepCore = true
 		return name, nil
 	}
 	return "", err
@@ -447,7 +458,3 @@ func withCPUSet(cpus string) oci.SpecOpts {
 func withHostIPC() oci.SpecOpts {
 	return oci.WithHostNamespace(specs.IPCNamespace)
 }
-
-
-
-

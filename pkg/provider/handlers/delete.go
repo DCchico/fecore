@@ -116,6 +116,7 @@ func deleteReplica(ctx context.Context, client *containerd.Client, fn Function, 
 			return containerErr
 		}
 	}
+	ReleaseDedicatedCore(name)
 	log.Printf("[deleteReplica] Removed replica container: '%s'\n", name)
 	return nil
 }
