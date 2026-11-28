@@ -116,6 +116,33 @@ func TestTruncated500DoesNotRetry(t *testing.T) {
 	}
 }
 
+func TestEmpty500RetriesUntilTheHandlerAccepts(t *testing.T) {
+	var calls atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if calls.Add(1) == 1 {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer upstream.Close()
+	target, _ := url.Parse(upstream.URL)
+	host, _, _ := net.SplitHostPort(target.Host)
+	fs := handlers.NewActiveReplicaStore("fn", "fn-a", host)
+	rec := dispatch(t, &stubResolver{target: *target}, fs, nil)
+	if rec.Code != http.StatusOK || rec.Body.String() != "ok" {
+		t.Fatalf("status %d body %q", rec.Code, rec.Body.String())
+	}
+	if calls.Load() != 2 {
+		t.Fatalf("empty 500 calls %d", calls.Load())
+	}
+	active, idle, _ := fs.ReplicaSets("fn")
+	if active != 0 || idle != 1 {
+		t.Fatalf("after ready response active=%d idle=%d", active, idle)
+	}
+}
+
 func Test400ReadFailureQuarantines(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hj, _ := w.(http.Hijacker)

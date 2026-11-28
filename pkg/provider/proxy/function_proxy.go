@@ -402,6 +402,27 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 				httputil.Errorf(w, http.StatusBadGateway, "function status %d body did not complete", response.StatusCode)
 				return
 			}
+			// An empty 500 has no application document. The watchdog returns
+			// it while the process is not accepting work yet. Retry on this
+			// same claim; do not treat it as a finished handler.
+			if response.StatusCode == http.StatusInternalServerError && len(body) == 0 {
+				phase.Store(0)
+				connectionRetries++
+				log.Printf("[function_proxy] empty 500 before the handler accepted work requestID=%s retry=%d", requestID, connectionRetries)
+				if ctx.Err() != nil {
+					noteAbort("pre_start")
+					stopProxyRetries(w, requestID, functionName, attempts, connectionRetries, proxyStart, ctx.Err())
+					return
+				}
+				jitter := rand.Intn(backoff / 4)
+				sleepTime := backoff + jitter
+				if !waitOrAbandoned(ctx, time.Duration(sleepTime)*time.Millisecond) {
+					stopProxyRetries(w, requestID, functionName, attempts, connectionRetries, proxyStart, ctx.Err())
+					return
+				}
+				backoff = int(math.Min(float64(backoff*2), float64(maxBackoff)))
+				continue
+			}
 			log.Printf("[function_proxy] completed application error status=%d requestID=%s bytes=%d", response.StatusCode, requestID, len(body))
 			completedErrorBody = body
 			response.Body = io.NopCloser(bytes.NewReader(body))
