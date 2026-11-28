@@ -740,6 +740,17 @@ func (fs *FunctionStore) RecordInvocationDetails(functionName, vDAGID, sequenceI
 	}
 }
 
+// ReleaseDirectReservation makes a replica eligible again after the call
+// published its object outside the process. A direct hold that is no longer
+// the only copy must not occupy the deployed budget.
+func (fs *FunctionStore) ReleaseDirectReservation(containerIP string) {
+	fs.dfMu.Lock()
+	defer fs.dfMu.Unlock()
+	if contains(fs.dependentContainers, containerIP) {
+		fs.dependentContainers = remove(fs.dependentContainers, containerIP)
+	}
+}
+
 // GetInvocationDetails retrieves the container IP and status using functionName, vDAGID, and sequenceID
 func (fs *FunctionStore) GetInvocationDetails(functionName, vDAGID, sequenceID string) (string, bool) {
 	fs.dfMu.Lock()

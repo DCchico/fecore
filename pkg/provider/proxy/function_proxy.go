@@ -123,6 +123,20 @@ func invocationReady(ctx context.Context, functionAddr url.URL) (bool, bool) {
 	return false, true
 }
 
+func publishedToSharedMemory(body []byte) bool {
+	var doc struct {
+		Access       string `json:"access"`
+		PublishBytes int    `json:"publish_bytes"`
+	}
+	if json.Unmarshal(body, &doc) != nil {
+		return false
+	}
+	if doc.Access == "direct" || doc.Access == "" {
+		return false
+	}
+	return doc.Access == "shared_memory" || doc.Access == "remote" || doc.PublishBytes > 0
+}
+
 func directPythonListener(ctx context.Context, host string) bool {
 	reqCtx, cancel := context.WithTimeout(ctx, 200*time.Millisecond)
 	defer cancel()
@@ -576,6 +590,10 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 	fs.UpdateFunctionStats(functionName, fnSetupTime, fnExecTime)
 
 	ip = strings.Split(functionAddr.Host, ":")[0]
+	if publishedToSharedMemory(functionBody) {
+		fs.ReleaseDirectReservation(ip)
+		log.Printf("[function_proxy] published object released direct hold requestID=%s ip=%s", requestID, ip)
+	}
 	if proxyReq != nil && proxyReq.URL != nil {
 		replicaReleased = true
 		err = fs.ReleaseReplica(functionName, ip, requestID, vDAGID, sequenceID)

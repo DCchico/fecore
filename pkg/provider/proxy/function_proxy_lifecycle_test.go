@@ -223,6 +223,18 @@ func TestDirectPythonListenerIsReadyWithoutTheWatchdogUpstream(t *testing.T) {
 	}
 }
 
+func TestPublishedSharedMemoryReleasesTheHold(t *testing.T) {
+	if publishedToSharedMemory([]byte(`{"ok":true,"access":"direct","publish_bytes":0}`)) {
+		t.Fatal("an in-process direct object was treated as published")
+	}
+	if !publishedToSharedMemory([]byte(`{"ok":true,"access":"shared_memory","publish_bytes":120}`)) {
+		t.Fatal("a shared-memory publication kept the direct hold")
+	}
+	if publishedToSharedMemory([]byte(`not-json`)) {
+		t.Fatal("a non-json body released the hold")
+	}
+}
+
 func waitForLocalAccept(t *testing.T, addr string) {
 	t.Helper()
 	deadline := time.Now().Add(time.Second)

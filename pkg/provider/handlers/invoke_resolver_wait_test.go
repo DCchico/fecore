@@ -75,6 +75,31 @@ func TestNoIdleReplicaAtBudgetExitsOnCancel(t *testing.T) {
 	}
 }
 
+func TestPublishedObjectReleasesTheReservedReplica(t *testing.T) {
+	fs, err := InitFunctionStore(&memStorage{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fs.deployedFunctions["timeline"] = &Function{
+		name:             "timeline",
+		replicas:         1,
+		deployedReplicas: 1,
+		activeReplicas:   map[string]string{},
+		idleReplicas:     map[string]string{"timeline-a": "10.0.0.9"},
+		idleReplicasTs:   map[string]time.Time{},
+	}
+	fs.RecordInvocationDetails("timeline", "user-325-home_timeline", "1", "10.0.0.9", false, true)
+	name, _, ok, err := fs.GetIdleReplicaAtomic("timeline", "reader")
+	if err != nil || ok || name != "" {
+		t.Fatalf("reserved replica was offered name=%s ok=%t err=%v", name, ok, err)
+	}
+	fs.ReleaseDirectReservation("10.0.0.9")
+	name, ip, ok, err := fs.GetIdleReplicaAtomic("timeline", "reader")
+	if err != nil || !ok || name != "timeline-a" || ip != "10.0.0.9" {
+		t.Fatalf("published replica name=%s ip=%s ok=%t err=%v", name, ip, ok, err)
+	}
+}
+
 func TestInactiveReleaseAfterDeleteDoesNotPanic(t *testing.T) {
 	fs := &FunctionStore{}
 	err := fs.UpdateReplicaStatusInactive("gone", "10.0.0.1", "req")
