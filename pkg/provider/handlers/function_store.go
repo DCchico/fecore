@@ -396,6 +396,40 @@ func (fs *FunctionStore) NoteClientAbort(fn, ip, requestID, vdag, seq, outcome s
 	LogOccupancy("client_abort", requestID, fn, vdag, seq, fs.ContainerByIP(ip), ip, outcome)
 }
 
+// NewActiveReplicaStore is the in-memory store used by the proxy regression.
+// It does not open a database or a container.
+func NewActiveReplicaStore(fn, container, ip string) *FunctionStore {
+	return &FunctionStore{
+		deployedFunctions: map[string]*Function{
+			fn: {
+				name:             fn,
+				replicas:         1,
+				deployedReplicas: 1,
+				activeReplicas:   map[string]string{container: ip},
+				idleReplicas:     map[string]string{},
+				idleReplicasTs:   map[string]time.Time{},
+			},
+		},
+		invocationDetails:     map[string]map[string]map[string]string{},
+		invocationDetailsByIP: map[string]InvocationInfo{},
+		statsChan:             make(chan FunctionStat, 8),
+	}
+}
+
+// ReplicaSets reports where one function's replicas sit.
+func (fs *FunctionStore) ReplicaSets(fn string) (active, idle, replicas int) {
+	if fs == nil {
+		return 0, 0, 0
+	}
+	fs.dfMu.Lock()
+	defer fs.dfMu.Unlock()
+	function := fs.deployedFunctions[fn]
+	if function == nil {
+		return 0, 0, 0
+	}
+	return len(function.activeReplicas), len(function.idleReplicas), function.replicas
+}
+
 // QuarantineReplica removes a container from the active set without returning
 // it to idle. Used when the invocation's end was not observed. The deployed
 // replica budget does not grow to replace it.

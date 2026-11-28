@@ -112,7 +112,12 @@ func (i *InvokeResolver) Resolve(functionName string, requestID string, dependen
 				return url.URL{}, false, false, fmt.Errorf("dependency wait canceled: %w", err)
 			}
 			containerIP, isRunning := i.fs.GetInvocationDetails(actualFunctionName, dep.SenderVDAG, dep.SenderSeq)
-			if !isRunning && containerIP != "" {
+			if containerIP == "Unknown" {
+				// Quarantine and any other removal leave the recorded address
+				// in neither set. That is not an idle container to claim.
+				log.Printf("[Resolve] Dependent container %s is not claimable - SenderVDAG: %s, SenderSeq: %s", containerIP, dep.SenderVDAG, dep.SenderSeq)
+				break
+			} else if !isRunning && containerIP != "" {
 				log.Printf("[Resolve] Using idle dependent container %s - SenderVDAG: %s, SenderSeq: %s", containerIP, dep.SenderVDAG, dep.SenderSeq)
 				// Use the idle container
 				replicaIP := containerIP
@@ -134,9 +139,6 @@ func (i *InvokeResolver) Resolve(functionName string, requestID string, dependen
 					log.Printf("[Resolve] dependency wait canceled requestID=%s err=%v", requestID, ctx.Err())
 					return url.URL{}, false, false, fmt.Errorf("dependency wait canceled: %w", ctx.Err())
 				}
-			} else if containerIP == "Unknown" {
-				log.Printf("[Resolve] Dependent container %s is unknown - SenderVDAG: %s, SenderSeq: %s", containerIP, dep.SenderVDAG, dep.SenderSeq)
-				break
 			} else {
 				log.Printf("[Resolve] Dependent container %s is running - SenderVDAG: %s, SenderSeq: %s", containerIP, dep.SenderVDAG, dep.SenderSeq)
 				if !sleepWithin(ctx, 3*time.Millisecond) {

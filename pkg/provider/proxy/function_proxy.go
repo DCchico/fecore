@@ -50,6 +50,31 @@ const (
 	proxyOverallDeadline = 120 * time.Second
 )
 
+// upstreamDeadline is the absolute end of this request's provider budget.
+// It is taken when the request is accepted, so resolver waiting consumes it.
+// A client abort does not move it, and a late start does not grant another
+// responseTimeout. Tests replace the function; the production budget stays
+// responseTimeout.
+var upstreamDeadline = func(start time.Time) time.Time {
+	return start.Add(responseTimeout)
+}
+
+// SetUpstreamDeadlineForTest replaces the budget clock. The returned function
+// restores the previous one.
+func SetUpstreamDeadlineForTest(fn func(time.Time) time.Time) func(time.Time) time.Time {
+	prev := upstreamDeadline
+	if fn != nil {
+		upstreamDeadline = fn
+	}
+	return prev
+}
+
+// functionResolver is the claim path the proxy calls. The production resolver
+// is *handlers.InvokeResolver. Tests supply a transport seam.
+type functionResolver interface {
+	Resolve(functionName string, requestID string, dependencies []handlers.DependencyInfo, vDAGID string, sequenceID string, releaseLocalState bool, reserveLocalState bool, dataCentricDependency string, ctx context.Context) (url.URL, bool, bool, error)
+}
+
 func waitOrAbandoned(ctx context.Context, d time.Duration) bool {
 	if ctx.Err() != nil {
 		return false
@@ -81,6 +106,12 @@ func setProxyBudgetHeaders(h http.Header, attempts, retries int, started time.Ti
 	h.Set("X-Proxy-Attempts", strconv.Itoa(attempts))
 	h.Set("X-Proxy-Retries", strconv.Itoa(retries))
 	h.Set("X-Proxy-Retry-Ms", strconv.FormatInt(time.Since(started).Milliseconds(), 10))
+}
+
+// DispatchForTest runs the production proxy loop. The resolver and client are
+// the transport seams; the disposal decisions are not reimplemented here.
+func DispatchForTest(w http.ResponseWriter, r *http.Request, client *http.Client, resolver functionResolver, fs *handlers.FunctionStore) {
+	proxyRequest(w, r, client, resolver, fs)
 }
 
 func NewHandlerFunc(config types.FaaSConfig, resolver *handlers.InvokeResolver, fs *handlers.FunctionStore) http.HandlerFunc {
@@ -137,9 +168,12 @@ func NewHandlerFunc(config types.FaaSConfig, resolver *handlers.InvokeResolver, 
 }
 
 // proxyRequest handles the actual resolution of and then request to the function service.
-func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient *http.Client, resolver *handlers.InvokeResolver, fs *handlers.FunctionStore) {
+func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient *http.Client, resolver functionResolver, fs *handlers.FunctionStore) {
 	/* Begin function replica setup */
 	fnSetupStart := time.Now()
+	// The detached execution deadline is this instant plus the provider
+	// budget. Resolver waiting is inside it.
+	providerDeadline := upstreamDeadline(fnSetupStart)
 	ctx := originalReq.Context()
 	// The 120s budget covers resolver waits and the later proxy retries.
 	ctx, cancelOverall := context.WithTimeout(ctx, proxyOverallDeadline)
@@ -214,6 +248,11 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 	var phase atomic.Int32
 	var phaseMu sync.Mutex
 	var abortOnce sync.Once
+	endFlight := func() {
+		phaseMu.Lock()
+		phase.Store(2)
+		phaseMu.Unlock()
+	}
 	noteAbort := func(outcome string) {
 		abortOnce.Do(func() {
 			ip := ""
@@ -231,9 +270,10 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 			noteAbort("continuing")
 		}
 	}()
-	// The upstream call keeps the provider budget after the caller disconnects.
-	// A dropped client socket is not the function's end.
-	execCtx, cancelExec := context.WithTimeout(context.Background(), responseTimeout)
+	// The upstream call keeps running after the caller disconnects, but only
+	// until the deadline taken at accept. A dropped socket is not the end,
+	// and the wait for a replica does not start a new budget.
+	execCtx, cancelExec := context.WithDeadline(context.Background(), providerDeadline)
 	defer cancelExec()
 	defer func() {
 		if resolveErr != nil || replicaReleased || quarantined || functionAddr.Host == "" {
@@ -279,6 +319,11 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 	backoff := baseBackoff
 	var wroteNs atomic.Int64
 	var firstNs atomic.Int64
+	var completedErrorBody []byte
+	if !time.Now().Before(providerDeadline) {
+		httputil.Errorf(w, http.StatusGatewayTimeout, "provider budget exhausted before execution")
+		return
+	}
 
 	for connectionRetries < maxRetries {
 		if phase.Load() == 0 && ctx.Err() != nil {
@@ -294,8 +339,9 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 		}
 		proxyReq.Header.Set("X-Provider-Accept-Realtime-Ns", strconv.FormatInt(acceptAt.UnixNano(), 10))
 
-		// The upstream deadline is the provider budget, not the client context.
-		reqCtx, cancel := context.WithTimeout(execCtx, responseTimeout)
+		// Same absolute deadline for every attempt. This does not add
+		// responseTimeout again after the resolver wait.
+		reqCtx, cancel := context.WithCancel(execCtx)
 		reqCtx = httptrace.WithClientTrace(reqCtx, &httptrace.ClientTrace{
 			WroteRequest: func(httptrace.WroteRequestInfo) {
 				wroteNs.Store(time.Now().UnixNano())
@@ -323,6 +369,7 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 				// container and do not return it to the idle pool.
 				quarantined = true
 				replicaReleased = true
+				endFlight()
 				qerr := fs.QuarantineReplica(functionName, ip, requestID, vDAGID, sequenceID)
 				log.Printf("[function_proxy] execution end unknown requestID=%s err=%v quarantine=%v", requestID, err, qerr)
 				stopProxyRetries(w, requestID, functionName, attempts, connectionRetries, proxyStart, err)
@@ -339,45 +386,40 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 
 			// Increase backoff for next retry (capped)
 			backoff = int(math.Min(float64(backoff*2), float64(maxBackoff)))
-		} else if response.StatusCode == 500 {
+		} else if response.StatusCode == http.StatusInternalServerError || response.StatusCode == http.StatusBadRequest {
+			// A status line is not an execution end. Read the whole body
+			// before deciding. A short or failed read quarantines; there is
+			// no second attempt on this container. reqCtx stays live until
+			// the original deadline so a slow but complete body can finish.
+			body, readErr := readUpstreamBody(reqCtx, response.Body)
+			cancel()
+			if readErr != nil {
+				quarantined = true
+				replicaReleased = true
+				endFlight()
+				qerr := fs.QuarantineReplica(functionName, ip, requestID, vDAGID, sequenceID)
+				log.Printf("[function_proxy] error body incomplete status=%d requestID=%s err=%v quarantine=%v", response.StatusCode, requestID, readErr, qerr)
+				httputil.Errorf(w, http.StatusBadGateway, "function status %d body did not complete", response.StatusCode)
+				return
+			}
+			log.Printf("[function_proxy] completed application error status=%d requestID=%s bytes=%d", response.StatusCode, requestID, len(body))
+			completedErrorBody = body
+			response.Body = io.NopCloser(bytes.NewReader(body))
+			break
+		} else if response.StatusCode != http.StatusOK {
+			// Gateway and watchdog timeouts can write a body while the
+			// function is still running. That is not a confirmed stop.
 			cancel()
 			if response.Body != nil {
 				response.Body.Close()
 			}
-			connectionRetries++
-			log.Printf("[function_proxy] Retry %d for %s: received 500 status", connectionRetries, functionName)
-			if ctx.Err() != nil {
-				stopProxyRetries(w, requestID, functionName, attempts, connectionRetries, proxyStart, ctx.Err())
-				return
-			}
-
-			// Use same backoff strategy for 500 errors
-			jitter := rand.Intn(backoff / 4)
-			sleepTime := backoff + jitter
-			if !waitOrAbandoned(ctx, time.Duration(sleepTime)*time.Millisecond) {
-				stopProxyRetries(w, requestID, functionName, attempts, connectionRetries, proxyStart, ctx.Err())
-				return
-			}
-
-			backoff = int(math.Min(float64(backoff*2), float64(maxBackoff)))
-		} else if response.StatusCode == 400 {
-			defer cancel()
-			log.Printf("[function_proxy] Function %s returned 400 Bad Request", functionName)
-
-			// Read the error response body
-			if response.Body != nil {
-				responseData, err := io.ReadAll(response.Body)
-				if err != nil {
-					log.Printf("[function_proxy] Error reading 400 response: %v", err)
-				} else {
-					log.Printf("[function_proxy] Function error details: %s", string(responseData))
-				}
-				// Important: Create a new reader for the body since we consumed it
-				response.Body = io.NopCloser(bytes.NewBuffer(responseData))
-			}
-
-			// Exit the retry loop - we'll forward this response as is
-			break
+			quarantined = true
+			replicaReleased = true
+			endFlight()
+			qerr := fs.QuarantineReplica(functionName, ip, requestID, vDAGID, sequenceID)
+			log.Printf("[function_proxy] unconfirmed status=%d requestID=%s quarantine=%v", response.StatusCode, requestID, qerr)
+			httputil.Errorf(w, http.StatusBadGateway, "function status %d did not confirm execution end", response.StatusCode)
+			return
 		} else {
 			defer cancel()
 			break
@@ -397,10 +439,10 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 		return
 	}
 
-	// For 400 errors, pass through the response with the error details
-	if response.StatusCode == 400 {
-		log.Printf("[function_proxy] Forwarding 400 Bad Request from function %s", functionName)
-		// Update replica status regardless of response status
+	// A fully read 400 or 500 is the function's own completed error.
+	// Release only after that read. Any other status was quarantined above.
+	if response.StatusCode == http.StatusBadRequest || response.StatusCode == http.StatusInternalServerError {
+		log.Printf("[function_proxy] Forwarding completed application error %d from function %s", response.StatusCode, functionName)
 		ip = strings.Split(functionAddr.Host, ":")[0]
 		if proxyReq != nil && proxyReq.URL != nil {
 			phaseMu.Lock()
@@ -414,31 +456,25 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 				return
 			}
 		}
-
-		// Copy headers from function response
 		clientHeader := w.Header()
 		copyHeaders(clientHeader, &response.Header)
 		w.Header().Set("Content-Type", getContentType(originalReq.Header, response.Header))
 		w.Header().Set("Request-ID", requestID)
 		setProxyBudgetHeaders(w.Header(), attempts, connectionRetries, proxyStart)
-		log.Printf("[function_proxy] budget requestID=%s attempts=%d retries=%d retry_ms=%d", requestID, attempts, connectionRetries, time.Since(proxyStart).Milliseconds())
-
-		// Forward the 400 status code
 		w.WriteHeader(response.StatusCode)
-
-		// Forward the response body
-		if response.Body != nil {
-			io.Copy(w, response.Body)
+		if len(completedErrorBody) > 0 {
+			_, _ = w.Write(completedErrorBody)
 		}
-
-		// Don't continue with normal response processing
 		return
 	}
 
-	// For other non-200 responses, return a generic error
-	if response.StatusCode != 200 {
-		log.Printf("[retryProxyRequest] Function %s returned non-200 status: %d\n", functionName, response.StatusCode)
-		httputil.Errorf(w, http.StatusInternalServerError, "Function returned status %d", response.StatusCode)
+	if response.StatusCode != http.StatusOK {
+		quarantined = true
+		replicaReleased = true
+		endFlight()
+		qerr := fs.QuarantineReplica(functionName, ip, requestID, vDAGID, sequenceID)
+		log.Printf("[function_proxy] unconfirmed status=%d requestID=%s quarantine=%v", response.StatusCode, requestID, qerr)
+		httputil.Errorf(w, http.StatusBadGateway, "function status %d did not confirm execution end", response.StatusCode)
 		return
 	}
 
@@ -454,6 +490,7 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 		if err != nil {
 			quarantined = true
 			replicaReleased = true
+			endFlight()
 			qerr := fs.QuarantineReplica(functionName, ip, requestID, vDAGID, sequenceID)
 			log.Printf("[function_proxy] execution end unknown while reading body requestID=%s err=%v quarantine=%v", requestID, err, qerr)
 			return
@@ -509,6 +546,27 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 		if len(functionBody) > 0 {
 			_, _ = w.Write(functionBody)
 		}
+	}
+}
+
+func readUpstreamBody(ctx context.Context, body io.ReadCloser) ([]byte, error) {
+	if body == nil {
+		return nil, nil
+	}
+	defer body.Close()
+	done := make(chan struct{})
+	var buf []byte
+	var err error
+	go func() {
+		buf, err = io.ReadAll(body)
+		close(done)
+	}()
+	select {
+	case <-ctx.Done():
+		_ = body.Close()
+		return nil, ctx.Err()
+	case <-done:
+		return buf, err
 	}
 }
 
