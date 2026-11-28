@@ -185,6 +185,60 @@ func TestFunctionPortDialIsTheReadinessGate(t *testing.T) {
 	}
 }
 
+func TestDirectPythonListenerIsReadyWithoutTheWatchdogUpstream(t *testing.T) {
+	if probe, err := net.DialTimeout("tcp", "127.0.0.1:5000", 50*time.Millisecond); err == nil {
+		_ = probe.Close()
+		t.Skip("port 5000 is already accepting")
+	}
+	ln, err := net.Listen("tcp", "127.0.0.1:8080")
+	if err != nil {
+		t.Skip("port 8080 is already accepting")
+	}
+	watchdog := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Server", "")
+		w.WriteHeader(http.StatusOK)
+	})}
+	go watchdog.Serve(ln)
+	waitForLocalAccept(t, "127.0.0.1:8080")
+	ready, retry := invocationReady(context.Background(), url.URL{Host: "127.0.0.1:8080"})
+	watchdog.Close()
+	if ready || !retry {
+		t.Fatalf("watchdog health without its upstream ready=%t retry=%t", ready, retry)
+	}
+	ln, err = net.Listen("tcp", "127.0.0.1:8080")
+	if err != nil {
+		t.Fatal(err)
+	}
+	python := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Server", "BaseHTTP/0.6 Python/3.11.18")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"ok": true}`))
+	})}
+	go python.Serve(ln)
+	defer python.Close()
+	waitForLocalAccept(t, "127.0.0.1:8080")
+	ready, retry = invocationReady(context.Background(), url.URL{Host: "127.0.0.1:8080"})
+	if !ready || !retry {
+		t.Fatalf("python listener ready=%t retry=%t", ready, retry)
+	}
+}
+
+func waitForLocalAccept(t *testing.T, addr string) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for {
+		conn, err := net.DialTimeout("tcp", addr, 20*time.Millisecond)
+		if err == nil {
+			_ = conn.Close()
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("listener %s did not accept", addr)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
 func Test400ReadFailureQuarantines(t *testing.T) {
 	upstream := httptest.NewServer(withHealth(func(w http.ResponseWriter, r *http.Request) {
 		hj, _ := w.(http.Hijacker)

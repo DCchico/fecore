@@ -107,14 +107,36 @@ func invocationReady(ctx context.Context, functionAddr url.URL) (bool, bool) {
 	}
 	dialer := net.Dialer{Timeout: 200 * time.Millisecond}
 	conn, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort(host, "5000"))
-	if err != nil {
-		if ctx.Err() != nil {
-			return false, false
-		}
-		return false, true
+	if err == nil {
+		_ = conn.Close()
+		return true, true
 	}
-	_ = conn.Close()
-	return true, true
+	if ctx.Err() != nil {
+		return false, false
+	}
+	// The four independent applications are the HTTP server on 8080.
+	// of-watchdog also listens there, but it does not identify itself as
+	// the Python runtime, and its upstream is still port 5000.
+	if directPythonListener(ctx, host) {
+		return true, true
+	}
+	return false, true
+}
+
+func directPythonListener(ctx context.Context, host string) bool {
+	reqCtx, cancel := context.WithTimeout(ctx, 200*time.Millisecond)
+	defer cancel()
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, "http://"+net.JoinHostPort(host, watchdogPort)+"/_/health", nil)
+	if err != nil {
+		return false
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64))
+	return resp.StatusCode == http.StatusOK && strings.Contains(resp.Header.Get("Server"), "Python")
 }
 
 func stopProxyRetries(w http.ResponseWriter, requestID, functionName string, attempts, retries int, started time.Time, reason error) {
