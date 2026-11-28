@@ -348,13 +348,18 @@ func (fs *FunctionStore) AddActiveReplica(fn string, cn string, ip string, reque
  * Note: lookup by ip and container name is not avaiable in resolver
  */
 func (fs *FunctionStore) UpdateReplicaStatusInactive(fn string, ip string, requestID string) error {
+	return fs.ReleaseReplica(fn, ip, requestID, "", "")
+}
+
+// ReleaseReplica returns a container to idle only after its invocation ended.
+func (fs *FunctionStore) ReleaseReplica(fn, ip, requestID, vdag, seq string) error {
 	defer timec.RecordDuration("(function_store.go) UpdateReplicaStatusInactive() Returning container w/ IP "+ip+" to inactive pool <requestID="+requestID+">", time.Now())
 	fs.dfMu.Lock()
 	defer fs.dfMu.Unlock()
 
 	fnState := fs.deployedFunctions[fn]
 	if fnState == nil || fnState.activeReplicas == nil {
-		LogOccupancy("release", requestID, fn, "", "", "", ip, "ambiguous")
+		LogOccupancy("release", requestID, fn, vdag, seq, "", ip, "ambiguous")
 		return fmt.Errorf("[UpdateReplicaStatusInactive] function %s is not deployed", fn)
 	}
 	cn := ""
@@ -365,7 +370,7 @@ func (fs *FunctionStore) UpdateReplicaStatusInactive(fn string, ip string, reque
 		}
 	}
 	if cn == "" {
-		LogOccupancy("release", requestID, fn, "", "", "", ip, "ambiguous")
+		LogOccupancy("release", requestID, fn, vdag, seq, "", ip, "ambiguous")
 		return fmt.Errorf("[UpdateReplicaStatusInactive] Unable to get function %s container %s in active set", fn, cn)
 	}
 	delete(fnState.activeReplicas, cn)
@@ -377,7 +382,45 @@ func (fs *FunctionStore) UpdateReplicaStatusInactive(fn string, ip string, reque
 	}
 	fnState.idleReplicas[cn] = ip
 	fnState.idleReplicasTs[cn] = time.Now()
-	LogOccupancy("release", requestID, fn, "", "", cn, ip, "released")
+	LogOccupancy("release", requestID, fn, vdag, seq, cn, ip, "released")
+	return nil
+}
+
+// NoteClientAbort records that the caller disconnected. It does not release
+// the replica. outcome=pre_start means the function HTTP had not started.
+// outcome=continuing means execution is still active.
+func (fs *FunctionStore) NoteClientAbort(fn, ip, requestID, vdag, seq, outcome string) {
+	if fs == nil {
+		return
+	}
+	LogOccupancy("client_abort", requestID, fn, vdag, seq, fs.ContainerByIP(ip), ip, outcome)
+}
+
+// QuarantineReplica removes a container from the active set without returning
+// it to idle. Used when the invocation's end was not observed. The deployed
+// replica budget does not grow to replace it.
+func (fs *FunctionStore) QuarantineReplica(fn, ip, requestID, vdag, seq string) error {
+	fs.dfMu.Lock()
+	defer fs.dfMu.Unlock()
+	fnState := fs.deployedFunctions[fn]
+	if fnState == nil || fnState.activeReplicas == nil {
+		LogOccupancy("release", requestID, fn, vdag, seq, "", ip, "unresolved")
+		return fmt.Errorf("[QuarantineReplica] function %s is not deployed", fn)
+	}
+	cn := ""
+	for c, cIp := range fnState.activeReplicas {
+		if cIp == ip {
+			cn = c
+			break
+		}
+	}
+	if cn == "" {
+		LogOccupancy("release", requestID, fn, vdag, seq, "", ip, "unresolved")
+		return fmt.Errorf("[QuarantineReplica] container for %s is not active", ip)
+	}
+	delete(fnState.activeReplicas, cn)
+	LogOccupancy("release", requestID, fn, vdag, seq, cn, ip, "unresolved")
+	log.Printf("[QuarantineReplica] container %s request %s left active and was not returned to idle", cn, requestID)
 	return nil
 }
 

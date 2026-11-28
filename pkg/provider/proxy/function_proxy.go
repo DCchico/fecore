@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log"
 	"math"
@@ -16,6 +17,8 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -202,12 +205,38 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 
 	functionAddr, coldStart, isInitialized, resolveErr := resolver.Resolve(functionName, requestID, dependencies, vDAGID, sequenceID, releaseLocalState, reserveLocalState, dataCentricDependency, ctx)
 	var replicaReleased bool
+	var quarantined bool
+	// phase: 0 not dispatched, 1 upstream call in flight or running, 2 finished.
+	var phase atomic.Int32
+	var phaseMu sync.Mutex
+	var abortOnce sync.Once
+	noteAbort := func(outcome string) {
+		abortOnce.Do(func() {
+			ip := ""
+			if functionAddr.Host != "" {
+				ip = strings.Split(functionAddr.Host, ":")[0]
+			}
+			fs.NoteClientAbort(functionName, ip, requestID, vDAGID, sequenceID, outcome)
+		})
+	}
+	go func() {
+		<-ctx.Done()
+		phaseMu.Lock()
+		defer phaseMu.Unlock()
+		if phase.Load() == 1 {
+			noteAbort("continuing")
+		}
+	}()
+	// The upstream call keeps the provider budget after the caller disconnects.
+	// A dropped client socket is not the function's end.
+	execCtx, cancelExec := context.WithTimeout(context.Background(), responseTimeout)
+	defer cancelExec()
 	defer func() {
-		if resolveErr != nil || replicaReleased || functionAddr.Host == "" {
+		if resolveErr != nil || replicaReleased || quarantined || functionAddr.Host == "" {
 			return
 		}
 		ip := strings.Split(functionAddr.Host, ":")[0]
-		if relErr := fs.UpdateReplicaStatusInactive(functionName, ip, requestID); relErr != nil {
+		if relErr := fs.ReleaseReplica(functionName, ip, requestID, vDAGID, sequenceID); relErr != nil {
 			log.Printf("[function_proxy] release on exit requestID=%s function=%s ip=%s err=%v", requestID, functionName, ip, relErr)
 		}
 	}()
@@ -246,7 +275,8 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 	backoff := baseBackoff
 
 	for connectionRetries < maxRetries {
-		if ctx.Err() != nil {
+		if phase.Load() == 0 && ctx.Err() != nil {
+			noteAbort("pre_start")
 			stopProxyRetries(w, requestID, functionName, attempts, connectionRetries, proxyStart, ctx.Err())
 			return
 		}
@@ -257,18 +287,30 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 			return
 		}
 
-		// The per-attempt timeout must stay alive until the winning body is
-		// copied. Canceling it immediately closes that body and the caller
-		// sees an unexpected EOF.
-		reqCtx, cancel := context.WithTimeout(ctx, responseTimeout)
+		// The upstream deadline is the provider budget, not the client context.
+		reqCtx, cancel := context.WithTimeout(execCtx, responseTimeout)
+		phase.Store(1)
 		attempts++
 		response, err = proxyClient.Do(proxyReq.WithContext(reqCtx))
 		if err != nil {
 			cancel()
-			connectionRetries++
-			log.Printf("[function_proxy] Retry %d for %s: %v (cold start: %t)", connectionRetries, functionName, err, coldStart)
-			if ctx.Err() != nil {
-				stopProxyRetries(w, requestID, functionName, attempts, connectionRetries, proxyStart, ctx.Err())
+			if dialFailed(err) {
+				phase.Store(0)
+				connectionRetries++
+				log.Printf("[function_proxy] Retry %d for %s: %v (cold start: %t)", connectionRetries, functionName, err, coldStart)
+				if ctx.Err() != nil {
+					noteAbort("pre_start")
+					stopProxyRetries(w, requestID, functionName, attempts, connectionRetries, proxyStart, ctx.Err())
+					return
+				}
+			} else {
+				// The handler may still be running. Do not retry into this
+				// container and do not return it to the idle pool.
+				quarantined = true
+				replicaReleased = true
+				qerr := fs.QuarantineReplica(functionName, ip, requestID, vDAGID, sequenceID)
+				log.Printf("[function_proxy] execution end unknown requestID=%s err=%v quarantine=%v", requestID, err, qerr)
+				stopProxyRetries(w, requestID, functionName, attempts, connectionRetries, proxyStart, err)
 				return
 			}
 
@@ -346,8 +388,11 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 		// Update replica status regardless of response status
 		ip = strings.Split(functionAddr.Host, ":")[0]
 		if proxyReq != nil && proxyReq.URL != nil {
+			phaseMu.Lock()
+			phase.Store(2)
+			phaseMu.Unlock()
 			replicaReleased = true
-			err = fs.UpdateReplicaStatusInactive(functionName, ip, requestID)
+			err = fs.ReleaseReplica(functionName, ip, requestID, vDAGID, sequenceID)
 			if err != nil {
 				log.Printf("[function_proxy] Unable to update function replica status '%s': %s\n", proxyReq.URL.String(), err.Error())
 				httputil.Errorf(w, http.StatusInternalServerError, "Can't reach service for '%s'", functionName)
@@ -387,9 +432,22 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 	proxyElapsed := time.Since(proxyStart)
 	timec.RecordDuration("(function_proxy.go) proxyRequest() : [ProxyRequestTime] <requestID="+requestID+", coldStart="+strconv.FormatBool(coldStart)+", retries="+strconv.Itoa(connectionRetries)+", connectTime="+strconv.Itoa(int(totalConnectTime))+" ms>", proxyStart)
 
+	var functionBody []byte
 	if response.Body != nil {
-		defer response.Body.Close()
+		functionBody, err = io.ReadAll(response.Body)
+		response.Body.Close()
+		if err != nil {
+			quarantined = true
+			replicaReleased = true
+			qerr := fs.QuarantineReplica(functionName, ip, requestID, vDAGID, sequenceID)
+			log.Printf("[function_proxy] execution end unknown while reading body requestID=%s err=%v quarantine=%v", requestID, err, qerr)
+			return
+		}
+		response.Body = io.NopCloser(bytes.NewReader(functionBody))
 	}
+	phaseMu.Lock()
+	phase.Store(2)
+	phaseMu.Unlock()
 
 	log.Printf("[function_proxy] Invocation of '%s' (coldStart: %t) took %d ms with %d retries \n", functionName, coldStart, proxyElapsed.Milliseconds(), connectionRetries)
 	fs.RecordInvocationTime(proxyElapsed, coldStart)
@@ -397,9 +455,9 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 	fs.UpdateFunctionStats(functionName, fnSetupTime, fnExecTime)
 
 	ip = strings.Split(functionAddr.Host, ":")[0]
-	if proxyReq != nil && proxyReq.URL != nil { // Check if proxyReq and proxyReq.URL are not nil
+	if proxyReq != nil && proxyReq.URL != nil {
 		replicaReleased = true
-		err = fs.UpdateReplicaStatusInactive(functionName, ip, requestID)
+		err = fs.ReleaseReplica(functionName, ip, requestID, vDAGID, sequenceID)
 		if err != nil {
 			log.Printf("[function_proxy] Unable to update function replica status '%s': %s\n", proxyReq.URL.String(), err.Error())
 			httputil.Errorf(w, http.StatusInternalServerError, "Can't reach service for '%s'", functionName)
@@ -425,10 +483,18 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 		log.Printf("[function_proxy] budget requestID=%s attempts=%d retries=%d retry_ms=%d", requestID, attempts, connectionRetries, time.Since(proxyStart).Milliseconds())
 
 		w.WriteHeader(response.StatusCode)
-		if response.Body != nil {
-			io.Copy(w, response.Body)
+		if len(functionBody) > 0 {
+			_, _ = w.Write(functionBody)
 		}
 	}
+}
+
+func dialFailed(err error) bool {
+	var op *net.OpError
+	if errors.As(err, &op) && op.Op == "dial" {
+		return true
+	}
+	return false
 }
 
 // buildProxyRequest creates a request object for the proxy request, it will ensure that
