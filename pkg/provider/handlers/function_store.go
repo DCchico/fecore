@@ -711,6 +711,15 @@ func (fs *FunctionStore) ContainerByIP(ip string) string {
 	return ""
 }
 
+// NotifyExecutionAdmission tells the orchestrator that this request now holds
+// a replica. The send is asynchronous and does not measure the function body.
+func (fs *FunctionStore) NotifyExecutionAdmission(workflow, namespace, id, generation, epoch string) {
+	if fs == nil {
+		return
+	}
+	go sendExecutionAdmission(fs.stateflowIP, fs.stateflowPort, workflow, namespace, id, generation, epoch)
+}
+
 // contains checks if a slice contains a specific element.
 func contains(slice []string, item string) bool {
 	for _, v := range slice {

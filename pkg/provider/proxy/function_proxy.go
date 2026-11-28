@@ -33,7 +33,7 @@ import (
 const (
 	watchdogPort        = "8080"
 	defaultContentType  = "text/plain"
-	dialTimeout         = 30 * time.Second // Increased from 10s to 30s
+	dialTimeout         = 30 * time.Second  // Increased from 10s to 30s
 	responseTimeout     = 120 * time.Second // upstream function budget, outside the 90s watchdog
 	maxIdleConns        = 100
 	maxIdleConnsPerHost = 20
@@ -216,6 +216,13 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 		httputil.Errorf(w, http.StatusServiceUnavailable, "No endpoints available for: %s.", functionName)
 		return
 	}
+	fs.NotifyExecutionAdmission(
+		originalReq.Header.Get("X-Pending-Workflow"),
+		originalReq.Header.Get("X-Pending-Namespace"),
+		originalReq.Header.Get("X-Pending-Id"),
+		originalReq.Header.Get("X-Pending-Generation"),
+		originalReq.Header.Get("X-Pending-Epoch"),
+	)
 
 	maxRetries := 1000
 	connectionRetries := 0

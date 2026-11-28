@@ -395,6 +395,44 @@ func sendReplicaUpdate(fecoreIP string, fecorePort int, stateflowIP string, stat
 	}
 }
 
+type executionAdmissionNotice struct {
+	Workflow   string `json:"workflow"`
+	Generation uint64 `json:"generation"`
+	Namespace  string `json:"namespace"`
+	ID         string `json:"id"`
+	Epoch      uint64 `json:"epoch"`
+}
+
+func sendExecutionAdmission(stateflowIP, stateflowPort, workflow, namespace, id, generation, epoch string) {
+	if stateflowIP == "" || stateflowPort == "" || workflow == "" || namespace == "" || id == "" || generation == "" || epoch == "" || epoch == "0" {
+		return
+	}
+	gen, genErr := strconv.ParseUint(generation, 10, 64)
+	ep, epErr := strconv.ParseUint(epoch, 10, 64)
+	if genErr != nil || epErr != nil || ep == 0 {
+		return
+	}
+	payload, err := json.Marshal(executionAdmissionNotice{
+		Workflow: workflow, Generation: gen, Namespace: namespace, ID: id, Epoch: ep,
+	})
+	if err != nil {
+		return
+	}
+	req, err := http.NewRequest("POST", fmt.Sprintf("http://%s:%s/execution-admission", stateflowIP, stateflowPort), bytes.NewBuffer(payload))
+	if err != nil {
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	client := &http.Client{Timeout: 2 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Printf("[execution-admission] notify failed workflow=%s id=%s err=%v", workflow, id, err)
+		return
+	}
+	defer resp.Body.Close()
+	log.Printf("[execution-admission] notified workflow=%s namespace=%s id=%s epoch=%s status=%d", workflow, namespace, id, epoch, resp.StatusCode)
+}
+
 func sendReplicaUpdateAsync(fecoreIP string, fecorePort int, stateflowIP string, stateflowPort string, functionName string, replicaCount int) {
 	go func() {
 		sendReplicaUpdate(fecoreIP, fecorePort, stateflowIP, stateflowPort, functionName, replicaCount)
