@@ -92,6 +92,31 @@ func waitOrAbandoned(ctx context.Context, d time.Duration) bool {
 	}
 }
 
+// invocationReady waits until the function process accepts connections.
+// of-watchdog 0.9.10 listens on 8080 and writes its lock file before the
+// upstream on 5000 is up, and its GET /_/health follows that lock. A TCP
+// dial to 5000 delivers no HTTP request. Any other port is the test double
+// or a direct upstream, so the caller submits once.
+func invocationReady(ctx context.Context, functionAddr url.URL) (bool, bool) {
+	if ctx.Err() != nil {
+		return false, false
+	}
+	host, port, err := net.SplitHostPort(functionAddr.Host)
+	if err != nil || port != watchdogPort {
+		return true, true
+	}
+	dialer := net.Dialer{Timeout: 200 * time.Millisecond}
+	conn, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort(host, "5000"))
+	if err != nil {
+		if ctx.Err() != nil {
+			return false, false
+		}
+		return false, true
+	}
+	_ = conn.Close()
+	return true, true
+}
+
 func stopProxyRetries(w http.ResponseWriter, requestID, functionName string, attempts, retries int, started time.Time, reason error) {
 	retryMs := time.Since(started).Milliseconds()
 	log.Printf("[function_proxy] stop retries requestID=%s function=%s attempts=%d retries=%d retry_ms=%d reason=%v",
@@ -331,6 +356,25 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 			stopProxyRetries(w, requestID, functionName, attempts, connectionRetries, proxyStart, ctx.Err())
 			return
 		}
+		ready, retryHealth := invocationReady(ctx, functionAddr)
+		if !ready {
+			if !retryHealth {
+				noteAbort("pre_start")
+				stopProxyRetries(w, requestID, functionName, attempts, connectionRetries, proxyStart, ctx.Err())
+				return
+			}
+			phase.Store(0)
+			connectionRetries++
+			log.Printf("[function_proxy] function port is not accepting requestID=%s retry=%d", requestID, connectionRetries)
+			jitter := rand.Intn(backoff / 4)
+			if !waitOrAbandoned(ctx, time.Duration(backoff+jitter)*time.Millisecond) {
+				noteAbort("pre_start")
+				stopProxyRetries(w, requestID, functionName, attempts, connectionRetries, proxyStart, ctx.Err())
+				return
+			}
+			backoff = int(math.Min(float64(backoff*2), float64(maxBackoff)))
+			continue
+		}
 		connStart = time.Now()
 		proxyReq, err = buildProxyRequest(originalReq, functionAddr, pathVars["params"], bodyBytes)
 		if err != nil {
@@ -402,27 +446,9 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 				httputil.Errorf(w, http.StatusBadGateway, "function status %d body did not complete", response.StatusCode)
 				return
 			}
-			// An empty 500 has no application document. The watchdog returns
-			// it while the process is not accepting work yet. Retry on this
-			// same claim; do not treat it as a finished handler.
-			if response.StatusCode == http.StatusInternalServerError && len(body) == 0 {
-				phase.Store(0)
-				connectionRetries++
-				log.Printf("[function_proxy] empty 500 before the handler accepted work requestID=%s retry=%d", requestID, connectionRetries)
-				if ctx.Err() != nil {
-					noteAbort("pre_start")
-					stopProxyRetries(w, requestID, functionName, attempts, connectionRetries, proxyStart, ctx.Err())
-					return
-				}
-				jitter := rand.Intn(backoff / 4)
-				sleepTime := backoff + jitter
-				if !waitOrAbandoned(ctx, time.Duration(sleepTime)*time.Millisecond) {
-					stopProxyRetries(w, requestID, functionName, attempts, connectionRetries, proxyStart, ctx.Err())
-					return
-				}
-				backoff = int(math.Min(float64(backoff*2), float64(maxBackoff)))
-				continue
-			}
+			// A finished response is not retried. An empty 500 can be the
+			// application after it has already run; body length is not a
+			// pre-execution signal. Cold start waits on GET /_/health.
 			log.Printf("[function_proxy] completed application error status=%d requestID=%s bytes=%d", response.StatusCode, requestID, len(body))
 			completedErrorBody = body
 			response.Body = io.NopCloser(bytes.NewReader(body))

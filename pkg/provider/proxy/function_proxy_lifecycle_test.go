@@ -38,6 +38,17 @@ func (s *stubResolver) Resolve(functionName string, requestID string, dependenci
 	return s.target, false, true, nil
 }
 
+func withHealth(h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/_/health" {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("OK"))
+			return
+		}
+		h(w, r)
+	}
+}
+
 func dispatch(t *testing.T, resolver *stubResolver, fs *handlers.FunctionStore, req *http.Request) *httptest.ResponseRecorder {
 	t.Helper()
 	if req == nil {
@@ -52,7 +63,7 @@ func dispatch(t *testing.T, resolver *stubResolver, fs *handlers.FunctionStore, 
 func TestClientAbortThenNormalCompletionReleases(t *testing.T) {
 	started := make(chan struct{})
 	var calls atomic.Int32
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := httptest.NewServer(withHealth(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
 		close(started)
 		time.Sleep(40 * time.Millisecond)
@@ -88,7 +99,7 @@ func TestClientAbortThenNormalCompletionReleases(t *testing.T) {
 
 func TestTruncated500DoesNotRetry(t *testing.T) {
 	var calls atomic.Int32
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := httptest.NewServer(withHealth(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
 		hj, ok := w.(http.Hijacker)
 		if !ok {
@@ -116,35 +127,66 @@ func TestTruncated500DoesNotRetry(t *testing.T) {
 	}
 }
 
-func TestEmpty500RetriesUntilTheHandlerAccepts(t *testing.T) {
-	var calls atomic.Int32
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if calls.Add(1) == 1 {
-			w.WriteHeader(http.StatusInternalServerError)
-			return
-		}
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("ok"))
+func TestEmpty500WithASideEffectIsNotReplayed(t *testing.T) {
+	var posts atomic.Int32
+	upstream := httptest.NewServer(withHealth(func(w http.ResponseWriter, r *http.Request) {
+		posts.Add(1)
+		w.WriteHeader(http.StatusInternalServerError)
 	}))
 	defer upstream.Close()
 	target, _ := url.Parse(upstream.URL)
 	host, _, _ := net.SplitHostPort(target.Host)
 	fs := handlers.NewActiveReplicaStore("fn", "fn-a", host)
 	rec := dispatch(t, &stubResolver{target: *target}, fs, nil)
-	if rec.Code != http.StatusOK || rec.Body.String() != "ok" {
-		t.Fatalf("status %d body %q", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status %d", rec.Code)
 	}
-	if calls.Load() != 2 {
-		t.Fatalf("empty 500 calls %d", calls.Load())
+	if posts.Load() != 1 {
+		t.Fatalf("application posts %d", posts.Load())
 	}
 	active, idle, _ := fs.ReplicaSets("fn")
 	if active != 0 || idle != 1 {
-		t.Fatalf("after ready response active=%d idle=%d", active, idle)
+		t.Fatalf("after the single response active=%d idle=%d", active, idle)
+	}
+}
+
+func TestFunctionPortDialIsTheReadinessGate(t *testing.T) {
+	ctx := context.Background()
+	ready, retry := invocationReady(ctx, url.URL{Host: "127.0.0.1:9"})
+	if !ready || !retry {
+		t.Fatalf("non-watchdog address ready=%t retry=%t", ready, retry)
+	}
+	probe, err := net.DialTimeout("tcp", "127.0.0.1:5000", 50*time.Millisecond)
+	if err == nil {
+		_ = probe.Close()
+		t.Skip("port 5000 is already accepting")
+	}
+	ready, retry = invocationReady(ctx, url.URL{Host: "127.0.0.1:" + watchdogPort})
+	if ready || !retry {
+		t.Fatalf("closed function port ready=%t retry=%t", ready, retry)
+	}
+	ln, err := net.Listen("tcp", "127.0.0.1:5000")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	go func() {
+		for {
+			c, accErr := ln.Accept()
+			if accErr != nil {
+				return
+			}
+			_ = c.Close()
+		}
+	}()
+	ready, retry = invocationReady(ctx, url.URL{Host: "127.0.0.1:" + watchdogPort})
+	if !ready || !retry {
+		t.Fatalf("open function port ready=%t retry=%t", ready, retry)
 	}
 }
 
 func Test400ReadFailureQuarantines(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := httptest.NewServer(withHealth(func(w http.ResponseWriter, r *http.Request) {
 		hj, _ := w.(http.Hijacker)
 		conn, buf, err := hj.Hijack()
 		if err != nil {
@@ -166,7 +208,7 @@ func Test400ReadFailureQuarantines(t *testing.T) {
 }
 
 func TestComplete400IsReleased(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := httptest.NewServer(withHealth(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "predecessor_unavailable", http.StatusBadRequest)
 	}))
 	defer upstream.Close()
@@ -184,7 +226,7 @@ func TestComplete400IsReleased(t *testing.T) {
 }
 
 func TestTimeoutStatusStaysUnresolved(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := httptest.NewServer(withHealth(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "upstream HTTP killed", http.StatusGatewayTimeout)
 	}))
 	defer upstream.Close()
@@ -200,7 +242,7 @@ func TestTimeoutStatusStaysUnresolved(t *testing.T) {
 
 func TestPreStartCancelReleasesWithoutDial(t *testing.T) {
 	var calls atomic.Int32
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := httptest.NewServer(withHealth(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -228,7 +270,7 @@ func TestResolverDelayConsumesTheOriginalBudget(t *testing.T) {
 	defer SetUpstreamDeadlineForTest(prev)
 	entered := make(chan struct{})
 	release := make(chan struct{})
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := httptest.NewServer(withHealth(func(w http.ResponseWriter, r *http.Request) {
 		close(entered)
 		select {
 		case <-r.Context().Done():

@@ -300,10 +300,29 @@ func (fs *FunctionStore) RemoveDeployedFunction(name string) error {
 	defer fs.dfMu.Unlock()
 	if _, ok := fs.deployedFunctions[name]; ok {
 		delete(fs.deployedFunctions, name)
+		fs.dropInvocationDetails(name)
 		log.Printf("[removeDeployedFunction] Removed deployed function '%s'", name)
 		return nil
 	}
 	return fmt.Errorf("[removeDeployedFunction] Unable to locate function %s", name)
+}
+
+// dropInvocationDetails forgets direct-container records for a removed
+// function. A later deploy must not treat a dead address as the current
+// predecessor. Caller holds dfMu.
+func (fs *FunctionStore) dropInvocationDetails(name string) {
+	seqs := fs.invocationDetails[name]
+	for _, bySeq := range seqs {
+		for _, ip := range bySeq {
+			if info, ok := fs.invocationDetailsByIP[ip]; ok && info.FunctionName == name {
+				delete(fs.invocationDetailsByIP, ip)
+			}
+			if contains(fs.dependentContainers, ip) {
+				fs.dependentContainers = remove(fs.dependentContainers, ip)
+			}
+		}
+	}
+	delete(fs.invocationDetails, name)
 }
 
 /* Gets the container name of an idle (warm) Function replica and sets the
@@ -675,19 +694,10 @@ func (fs *FunctionStore) GetIdleReplicaAtomic(fn string, requestID string) (stri
 		}
 	}
 
-	if name == "" && function.deployedReplicas > 0 && function.replicas >= function.deployedReplicas && len(function.idleReplicas) > 0 {
-		// Every idle replica is direct-reserved. Reclaim one inside the
-		// deployed budget instead of creating another allowance. The
-		// reservation list stays, and the process keeps each key's object:
-		// the original key's next direct dependency is routed back here.
-		for k, v := range function.idleReplicas {
-			name = k
-			ip = v
-			log.Printf("[GetIdleReplicaAtomic] reusing direct-reserved idle replica %s (%s) for %s within deployed budget %d", name, ip, fn, function.deployedReplicas)
-			break
-		}
-	}
-
+	// A direct-reserved replica keeps the predecessor object for the
+	// dependent call. Another namespace waits for a replica that is not
+	// reserved. Reclaiming it would overwrite that object, and creating
+	// another replica would pass the deployed budget.
 	if name == "" {
 		return "", "", false, nil
 	}
@@ -757,7 +767,7 @@ func (fs *FunctionStore) GetInvocationDetails(functionName, vDAGID, sequenceID s
 					}
 				}
 				// TODO: Unknown case: containerIP is not in idleReplicas or activeReplicas
-				log.Printf("[GetInvocationDetails] Unknown case: containerIP %s is not in idleReplicas or activeReplicas", containerIP)
+				log.Printf("[GetInvocationDetails] recorded container %s is not claimable function=%s vdag=%s seq=%s", containerIP, functionName, vDAGID, sequenceID)
 				return "Unknown", false
 			}
 		}

@@ -78,6 +78,32 @@ func TestRemoveFunctionDeletesKnownContainers(t *testing.T) {
 	lockIsFree(t, fs)
 }
 
+func TestRemoveDropsAStaleDirectRecord(t *testing.T) {
+	store := &memStorage{}
+	fs, err := InitFunctionStore(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fs.deployedFunctions["in-camera-mem-share"] = &Function{
+		name:           "in-camera-mem-share",
+		activeReplicas: map[string]string{},
+		idleReplicas:   map[string]string{},
+	}
+	fs.RecordInvocationDetails("in-camera-mem-share", "vDAG1", "14", "10.62.0.74", false, true)
+	if err := fs.RemoveDeployedFunction("in-camera-mem-share"); err != nil {
+		t.Fatal(err)
+	}
+	fs.deployedFunctions["in-camera-mem-share"] = &Function{
+		name:           "in-camera-mem-share",
+		activeReplicas: map[string]string{},
+		idleReplicas:   map[string]string{"new": "10.62.0.100"},
+	}
+	ip, running := fs.GetInvocationDetails("in-camera-mem-share", "vDAG1", "14")
+	if ip != "" || running {
+		t.Fatalf("stale predecessor remained ip=%s running=%t", ip, running)
+	}
+}
+
 func TestRemoveStorageErrorReleasesLock(t *testing.T) {
 	store := &memStorage{deleteFunctionErr: fmt.Errorf("db down")}
 	fs, err := InitFunctionStore(store)
