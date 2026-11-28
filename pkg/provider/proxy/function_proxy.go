@@ -14,6 +14,7 @@ import (
 	"math/rand"
 	"net"
 	"net/http"
+	"net/http/httptrace"
 	"net/url"
 	"strconv"
 	"strings"
@@ -203,6 +204,9 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 		originalReq.Body.Close()
 	}
 
+	// Accept is before replica resolution, so provider queue time stays inside
+	// the interval the function measures to its first timestamp.
+	acceptAt := time.Now()
 	functionAddr, coldStart, isInitialized, resolveErr := resolver.Resolve(functionName, requestID, dependencies, vDAGID, sequenceID, releaseLocalState, reserveLocalState, dataCentricDependency, ctx)
 	var replicaReleased bool
 	var quarantined bool
@@ -273,6 +277,8 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 	fnExecStart := time.Now()
 	totalConnectTime = -1
 	backoff := baseBackoff
+	var wroteNs atomic.Int64
+	var firstNs atomic.Int64
 
 	for connectionRetries < maxRetries {
 		if phase.Load() == 0 && ctx.Err() != nil {
@@ -286,9 +292,18 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 			httputil.Errorf(w, http.StatusInternalServerError, "Failed to resolve service: %s.", functionName)
 			return
 		}
+		proxyReq.Header.Set("X-Provider-Accept-Realtime-Ns", strconv.FormatInt(acceptAt.UnixNano(), 10))
 
 		// The upstream deadline is the provider budget, not the client context.
 		reqCtx, cancel := context.WithTimeout(execCtx, responseTimeout)
+		reqCtx = httptrace.WithClientTrace(reqCtx, &httptrace.ClientTrace{
+			WroteRequest: func(httptrace.WroteRequestInfo) {
+				wroteNs.Store(time.Now().UnixNano())
+			},
+			GotFirstResponseByte: func() {
+				firstNs.Store(time.Now().UnixNano())
+			},
+		})
 		phase.Store(1)
 		attempts++
 		response, err = proxyClient.Do(proxyReq.WithContext(reqCtx))
@@ -479,6 +494,14 @@ func proxyRequest(w http.ResponseWriter, originalReq *http.Request, proxyClient 
 		w.Header().Set("Content-Type", getContentType(originalReq.Header, response.Header))
 		w.Header().Set("Request-ID", requestID)
 		w.Header().Set("isInitialized", strconv.FormatBool(isInitialized))
+		w.Header().Set("X-Provider-Accept-Realtime-Ns", strconv.FormatInt(acceptAt.UnixNano(), 10))
+		if wrote := wroteNs.Load(); wrote > 0 {
+			w.Header().Set("X-Provider-Wrote-Realtime-Ns", strconv.FormatInt(wrote, 10))
+		}
+		if first := firstNs.Load(); first > 0 {
+			w.Header().Set("X-Provider-First-Byte-Realtime-Ns", strconv.FormatInt(first, 10))
+		}
+		log.Printf("CLOCK accept_realtime_ns=%d wrote_realtime_ns=%d first_byte_realtime_ns=%d request_id=%s", acceptAt.UnixNano(), wroteNs.Load(), firstNs.Load(), requestID)
 		setProxyBudgetHeaders(w.Header(), attempts, connectionRetries, proxyStart)
 		log.Printf("[function_proxy] budget requestID=%s attempts=%d retries=%d retry_ms=%d", requestID, attempts, connectionRetries, time.Since(proxyStart).Milliseconds())
 
